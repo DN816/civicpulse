@@ -1,0 +1,163 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user in CivicPulse (citizen, authority, or moderator).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The Firebase Auth UID of the user." },
+        "role": { "type": "string", "enum": ["citizen", "authority", "moderator"], "description": "The user role (custom claim matched)." },
+        "display_name": { "type": "string", "description": "Display name of the user." },
+        "email": { "type": "string", "format": "email", "description": "The user email address." },
+        "verified_account": { "type": "boolean", "description": "Whether the account is verified." },
+        "trust_score": { "type": "number", "description": "User trust score (0 to 100)." },
+        "trust_layer1": { "type": "number", "description": "Layer 1 trust score computed on submission." },
+        "trust_layer2": { "type": "number", "description": "Layer 2 trust score from citizen reviews." },
+        "total_points": { "type": "number", "description": "Gamification points earned." },
+        "fcm_token": { "type": "string", "description": "FCM push notification token." },
+        "zone_id": { "type": "string", "description": "Assigned geographic zone ID." },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["id", "role", "display_name", "email", "verified_account", "trust_score", "total_points", "created_at"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "An issue reported by a citizen.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "citizen_id": { "type": "string", "description": "UID of reporting citizen." },
+        "cluster_id": { "type": "string", "description": "Linked cluster ID (nullable)." },
+        "category": { "type": "string", "description": "Report category (e.g. pothole, streetlight)." },
+        "severity": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "status": { "type": "string", "enum": ["NEW", "AWAITING_CLARIFICATION", "REJECTED", "IN_REVIEW", "APPROVED", "ASSIGNED", "IN_PROGRESS", "AWAITING_CONFIRMATION", "RESOLVED", "REOPENED", "ESCALATED", "CLOSED", "APPEAL"] },
+        "photo_url": { "type": "string", "description": "URL of before photo." },
+        "after_photo_url": { "type": "string", "description": "URL of after photo (nullable)." },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "geo_accuracy_meters": { "type": "number" },
+        "description": { "type": "string", "description": "Optional citizen description." },
+        "classifier_confidence": { "type": "number" },
+        "trust_layer1": { "type": "number" },
+        "trust_layer2": { "type": "number" },
+        "trust_score": { "type": "number" },
+        "sla_deadline": { "type": "string", "format": "date-time" },
+        "escalation_sent": { "type": "boolean" },
+        "dispute_window_closes_at": { "type": "string", "format": "date-time" },
+        "resolution_attempt": { "type": "number" },
+        "pii_flag": { "type": "boolean" },
+        "pii_handled": { "type": "boolean" },
+        "moderator_id": { "type": "string" },
+        "locked_until": { "type": "string", "format": "date-time" },
+        "appeal_text": { "type": "string" },
+        "photo_timestamp": { "type": "string", "format": "date-time" },
+        "device_timestamp": { "type": "string", "format": "date-time" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "citizen_id", "category", "severity", "status", "photo_url", "lat", "lng", "geo_accuracy_meters", "device_timestamp", "created_at", "updated_at"]
+    },
+    "Cluster": {
+      "title": "Cluster",
+      "description": "Geospatially clustered reports within 50m of same category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "category": { "type": "string" },
+        "severity": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "status": { "type": "string", "enum": ["active", "resolved", "closed"] },
+        "centroid_lat": { "type": "number" },
+        "centroid_lng": { "type": "number" },
+        "affected_count": { "type": "number" },
+        "affected_citizen_ids": { "type": "array" },
+        "priority_score": { "type": "number" },
+        "trust_score": { "type": "number" },
+        "zone_id": { "type": "string" },
+        "sla_deadline": { "type": "string", "format": "date-time" },
+        "escalation_sent": { "type": "boolean" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "category", "severity", "status", "centroid_lat", "centroid_lng", "affected_count", "affected_citizen_ids", "priority_score", "trust_score", "created_at", "updated_at"]
+    },
+    "DisputeVote": {
+      "title": "DisputeVote",
+      "description": "A vote cast by an affected citizen on an authority's resolution attempt.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Formed as {reportId}_{attempt}_{userId}" },
+        "citizen_id": { "type": "string" },
+        "report_id": { "type": "string" },
+        "resolution_attempt": { "type": "number" },
+        "vote": { "type": "string", "enum": ["Yes", "No"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "citizen_id", "report_id", "resolution_attempt", "vote", "created_at"]
+    },
+    "ReportEvent": {
+      "title": "ReportEvent",
+      "description": "An action or milestone event on a report/cluster recorded by an authority or system.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "report_id": { "type": "string" },
+        "event_type": { "type": "string", "enum": ["acknowledge", "work_started", "work_completed"] },
+        "photo_url": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "report_id", "event_type", "created_by", "created_at"]
+    },
+    "HealthReport": {
+      "title": "HealthReport",
+      "description": "Weekly generated report of municipal performance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "report_text": { "type": "string" },
+        "week_start": { "type": "string", "format": "date" },
+        "week_end": { "type": "string", "format": "date" }
+      },
+      "required": ["id", "generated_at", "report_text", "week_start", "week_end"]
+    },
+    "EscalationLog": {
+      "title": "EscalationLog",
+      "description": "Record of SLA breach escalation emails sent.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "report_id": { "type": "string" },
+        "cluster_id": { "type": "string" },
+        "sent_at": { "type": "string", "format": "date-time" },
+        "email_subject": { "type": "string" },
+        "recipient_email": { "type": "string" }
+      },
+      "required": ["id", "report_id", "cluster_id", "sent_at", "email_subject", "recipient_email"]
+    },
+    "Authority": {
+      "title": "Authority",
+      "description": "An authority contact and details for a zone.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "escalation_email": { "type": "string", "format": "email" },
+        "zone_id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "escalation_email", "zone_id", "created_at"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "Collection of system users and profiles." },
+    "/reports/{reportId}": { "schema": "Report", "description": "Collection of citizen reports." },
+    "/clusters/{clusterId}": { "schema": "Cluster", "description": "Collection of geospatially clustered citizen reports." },
+    "/dispute_votes/{voteId}": { "schema": "DisputeVote", "description": "Collection of resolution disputes cast by citizens." },
+    "/report_events/{eventId}": { "schema": "ReportEvent", "description": "Collection of events logged by authorities." },
+    "/health_reports/{reportId}": { "schema": "HealthReport", "description": "Collection of weekly city-wide performance metrics." },
+    "/escalation_log/{logId}": { "schema": "EscalationLog", "description": "Collection of municipal escalation audit records." },
+    "/authorities/{authorityId}": { "schema": "Authority", "description": "Collection of authority profiles." }
+  }
+}

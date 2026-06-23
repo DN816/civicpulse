@@ -1,0 +1,119 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && request.auth.token.role == role;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Entity validations
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'role', 'display_name', 'email', 'verified_account', 'trust_score', 'total_points', 'created_at'])
+        && data.id == request.auth.uid
+        && data.role == 'citizen' // Citizens register themselves, authorities/moderators are manual
+        && data.display_name is string && data.display_name.size() <= 100
+        && data.email is string && data.email.size() <= 150
+        && data.verified_account is bool
+        && data.trust_score is int && data.trust_score >= 0 && data.trust_score <= 100
+        && data.total_points is int && data.total_points >= 0;
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['id', 'citizen_id', 'category', 'severity', 'status', 'photo_url', 'lat', 'lng', 'geo_accuracy_meters', 'device_timestamp', 'created_at', 'updated_at'])
+        && data.citizen_id == request.auth.uid
+        && data.category is string && data.category.size() <= 50
+        && data.severity in ['Low', 'Medium', 'High']
+        && data.status == 'NEW'
+        && data.photo_url is string && data.photo_url.size() <= 1000
+        && data.lat is float || data.lat is int
+        && data.lng is float || data.lng is int
+        && data.geo_accuracy_meters is float || data.geo_accuracy_meters is int;
+    }
+
+    function isValidDisputeVote(data) {
+      return data.keys().hasAll(['id', 'citizen_id', 'report_id', 'resolution_attempt', 'vote', 'created_at'])
+        && data.citizen_id == request.auth.uid
+        && data.vote in ['Yes', 'No']
+        && data.resolution_attempt is int
+        && data.report_id is string && data.report_id.size() <= 128;
+    }
+
+    // Users — citizen reads/writes own document only
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) 
+        && request.resource.data.role == resource.data.role // prevent self role-change
+        && request.resource.data.trust_score == resource.data.trust_score; // prevent trust_score tampering
+      allow delete: if false;
+    }
+
+    // Reports — citizen can create, anyone authenticated can read
+    // No user can update or delete a report directly (Cloud Functions or server side Admin SDK only)
+    match /reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if hasRole('citizen') && isValidId(reportId) && isValidReport(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Clusters — publicly readable, Cloud Functions/Server-side write only
+    match /clusters/{clusterId} {
+      allow read: if true; // Public — needed for map display
+      allow write: if false;
+    }
+
+    // Dispute votes — citizen can create one vote per (report, attempt)
+    // Document path enforces uniqueness: dispute_votes/{reportId}_{attempt}_{userId}
+    // IDENTITY PROTECTION: authorities have zero read access to this collection.
+    // Authorities may only receive the aggregate dispute count D, never individual rows.
+    // Cloud Functions / Server-side read this collection using Admin SDK (bypasses these rules).
+    match /dispute_votes/{voteId} {
+      allow read: if hasRole('moderator');
+      allow create: if hasRole('citizen') && isValidId(voteId) && isValidDisputeVote(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Report events — authority can create, moderator or authority can read
+    match /report_events/{eventId} {
+      allow read: if hasRole('authority') || hasRole('moderator');
+      allow create: if hasRole('authority') && isValidId(eventId);
+      allow update, delete: if false;
+    }
+
+    // Health reports — publicly readable, Cloud Functions write only
+    match /health_reports/{reportId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Escalation log — moderator and authority read only
+    match /escalation_log/{logId} {
+      allow read: if hasRole('authority') || hasRole('moderator');
+      allow write: if false;
+    }
+
+    // Authorities — authority reads own record only, moderator can read all
+    match /authorities/{authorityId} {
+      allow read: if isOwner(authorityId) || hasRole('moderator');
+      allow write: if false;
+    }
+  }
+}
