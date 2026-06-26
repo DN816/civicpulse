@@ -5,9 +5,10 @@ import { Shield } from 'lucide-react';
 import WelcomeScreen from './screens/shared/WelcomeScreen';
 import SignInScreen from './screens/shared/SignInScreen';
 import CreateAccountScreen from './screens/shared/CreateAccountScreen';
+import EmailVerificationScreen from './screens/shared/EmailVerificationScreen';
 import RoleRouter from './navigation/RoleRouter';
 
-type AppScreen = 'welcome' | 'signin' | 'create-account' | 'router';
+type AppScreen = 'welcome' | 'signin' | 'create-account' | 'router' | 'verify-email';
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>('welcome');
@@ -29,10 +30,15 @@ export default function App() {
       setUser(currentUser);
       setIsAuthChecking(false);
       if (currentUser) {
-        setScreen('router');
+        // If email/password user with unverified email, go to verification screen
+        if (!currentUser.emailVerified && currentUser.providerData[0]?.providerId === 'password') {
+          setScreen('verify-email');
+        } else {
+          setScreen('router');
+        }
       } else {
         // If logged out, only redirect back if on router screen
-        setScreen((prev) => (prev === 'router' ? 'welcome' : prev));
+        setScreen((prev) => (prev === 'router' || prev === 'verify-email' ? 'welcome' : prev));
       }
     });
     return () => unsubscribe();
@@ -62,6 +68,8 @@ export default function App() {
       return <SignInScreen onNavigate={setScreen} />;
     case 'create-account':
       return <CreateAccountScreen onNavigate={setScreen} />;
+    case 'verify-email':
+      return <EmailVerificationScreen onNavigate={setScreen} />;
     case 'router':
       return <RoleRouter onNavigate={setScreen} />;
     default:

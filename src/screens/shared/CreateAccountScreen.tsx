@@ -4,12 +4,13 @@ import { auth } from '../../config/firebase';
 import { 
   createUserWithEmailAndPassword, 
   updateProfile,
+  sendEmailVerification,
   signInWithPopup, 
   GoogleAuthProvider 
 } from 'firebase/auth';
 
 interface CreateAccountScreenProps {
-  onNavigate: (screen: 'welcome' | 'signin' | 'router') => void;
+  onNavigate: (screen: 'welcome' | 'signin' | 'router' | 'verify-email') => void;
 }
 
 export default function CreateAccountScreen({ onNavigate }: CreateAccountScreenProps) {
@@ -45,7 +46,9 @@ export default function CreateAccountScreen({ onNavigate }: CreateAccountScreenP
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       // Update profile with display name
       await updateProfile(userCredential.user, { displayName });
-      onNavigate('router');
+      // Send verification email and redirect to verification screen
+      await sendEmailVerification(userCredential.user);
+      onNavigate('verify-email');
     } catch (err: any) {
       console.error(err);
       if (err.code === 'auth/operation-not-allowed') {

@@ -9,7 +9,7 @@ import ModeratorQueueScreen from '../screens/moderator/ModeratorQueueScreen';
 import ErrorScreen from '../screens/shared/ErrorScreen';
 
 interface RoleRouterProps {
-  onNavigate: (screen: 'welcome' | 'signin' | 'create-account' | 'router') => void;
+  onNavigate: (screen: 'welcome' | 'signin' | 'create-account' | 'router' | 'verify-email') => void;
 }
 
 export default function RoleRouter({ onNavigate }: RoleRouterProps) {
@@ -21,6 +21,13 @@ export default function RoleRouter({ onNavigate }: RoleRouterProps) {
     const user = auth.currentUser;
     if (!user) {
       onNavigate('welcome');
+      return;
+    }
+
+    // Redirect unverified email/password users to verification screen
+    // Google sign-in users are always considered verified
+    if (!user.emailVerified && user.providerData[0]?.providerId === 'password') {
+      onNavigate('verify-email');
       return;
     }
 
