@@ -1,0 +1,6 @@
+{
+  "name": "CivicPulse",
+  "description": "A community reporting platform for local issues, connecting citizens and authorities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
