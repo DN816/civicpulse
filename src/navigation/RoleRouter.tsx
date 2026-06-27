@@ -4,7 +4,7 @@ import { UserRole } from '../types';
 
 // Import screens
 import CitizenRouter from '../screens/citizen/CitizenRouter';
-import AuthorityDashboardScreen from '../screens/authority/AuthorityDashboardScreen';
+import AuthorityRouter from '../screens/authority/AuthorityRouter';
 import ModeratorQueueScreen from '../screens/moderator/ModeratorQueueScreen';
 import ErrorScreen from '../screens/shared/ErrorScreen';
 
@@ -81,7 +81,7 @@ export default function RoleRouter({ onNavigate }: RoleRouterProps) {
   }
 
   if (role === 'citizen') return <CitizenRouter onNavigateOut={onNavigate} />;
-  if (role === 'authority') return <AuthorityDashboardScreen />;
+  if (role === 'authority') return <AuthorityRouter onNavigateOut={onNavigate} />;
   if (role === 'moderator') return <ModeratorQueueScreen />;
 
   return (
