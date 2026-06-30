@@ -1,1 +1,130 @@
 @import "tailwindcss";
+
+:root {
+  --cp-primary: #006e2f;
+  --cp-primary-dark: #004b1e;
+  --cp-primary-light: #e7eeff;
+  --cp-primary-container: #22c55e;
+  --cp-surface: #f9f9ff;
+  --cp-background: #f9f9ff;
+  --cp-border: #111c2d;
+  --cp-text-primary: #111c2d;
+  --cp-text-secondary: #3d4a3d;
+  --cp-text-inverse: #ffffff;
+  --cp-accent: #22c55e;
+  --cp-secondary: #735c00;
+  --cp-secondary-container: #fed01b;
+  --cp-tertiary: #005ac2;
+  --cp-tertiary-container: #82abff;
+  --cp-surface-container: #e7eeff;
+  --cp-surface-container-low: #f0f3ff;
+  --cp-surface-container-lowest: #ffffff;
+  --cp-on-surface-variant: #3d4a3d;
+  --cp-severity-high: #ba1a1a;
+  --cp-severity-high-bg: #ffdad6;
+  --cp-severity-medium: #735c00;
+  --cp-severity-medium-bg: #fed01b;
+  --cp-severity-low: #006e2f;
+  --cp-severity-low-bg: #6bff8f;
+  --cp-status-new: #3d4a3d;
+  --cp-status-active: #005ac2;
+  --cp-status-warning: #735c00;
+  --cp-status-success: #006e2f;
+  --cp-status-danger: #ba1a1a;
+  --cp-font-sans: Inter, sans-serif;
+  --cp-font-display: "Quicksand", sans-serif;
+  --cp-font-mono: "JetBrains Mono", monospace;
+}
+
+@theme {
+  --color-primary: var(--cp-primary);
+  --color-primary-dark: var(--cp-primary-dark);
+  --color-primary-light: var(--cp-primary-light);
+  --color-primary-container: var(--cp-primary-container);
+  --color-surface: var(--cp-surface);
+  --color-background: var(--cp-background);
+  --color-border: var(--cp-border);
+  --color-text-primary: var(--cp-text-primary);
+  --color-text-secondary: var(--cp-text-secondary);
+  --color-text-inverse: var(--cp-text-inverse);
+  --color-accent: var(--cp-accent);
+  --color-secondary: var(--cp-secondary);
+  --color-secondary-container: var(--cp-secondary-container);
+  --color-tertiary: var(--cp-tertiary);
+  --color-tertiary-container: var(--cp-tertiary-container);
+  --color-surface-container: var(--cp-surface-container);
+  --color-surface-container-low: var(--cp-surface-container-low);
+  --color-surface-container-lowest: var(--cp-surface-container-lowest);
+  --color-on-surface-variant: var(--cp-on-surface-variant);
+  --color-severity-high: var(--cp-severity-high);
+  --color-severity-high-bg: var(--cp-severity-high-bg);
+  --color-severity-medium: var(--cp-severity-medium);
+  --color-severity-medium-bg: var(--cp-severity-medium-bg);
+  --color-severity-low: var(--cp-severity-low);
+  --color-severity-low-bg: var(--cp-severity-low-bg);
+  --color-status-new: var(--cp-status-new);
+  --color-status-active: var(--cp-status-active);
+  --color-status-warning: var(--cp-status-warning);
+  --color-status-success: var(--cp-status-success);
+  --color-status-danger: var(--cp-status-danger);
+  --font-sans: var(--cp-font-sans);
+  --font-display: var(--cp-font-display);
+  --font-mono: var(--cp-font-mono);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.gamified-card {
+  border: 3px solid var(--cp-border);
+  border-radius: 1.25rem;
+  box-shadow: 6px 6px 0 0 var(--cp-border);
+}
+
+.gamified-shadow {
+  box-shadow: 6px 6px 0 0 var(--cp-border);
+}
+
+.neo-3d {
+  box-shadow: 4px 4px 0 0 var(--cp-border);
+  transition: all 0.1s ease;
+}
+
+.neo-3d:active:not(:disabled) {
+  box-shadow: 0 0 0 0 var(--cp-border);
+  transform: translate(4px, 4px);
+}
+
+.playful-dash {
+  background-image: url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='12' ry='12' stroke='%23006E2FFF' stroke-width='4' stroke-dasharray='12%2c 12' stroke-dashoffset='0' stroke-linecap='square'/%3e%3c/svg%3e");
+  border-radius: 12px;
+}
+
+.game-card {
+  background: #ffffff;
+  border: 4px solid var(--cp-border);
+  box-shadow: 4px 4px 0 0 var(--cp-border);
+  transition: all 0.1s ease;
+}
+
+.game-card:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 var(--cp-border);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

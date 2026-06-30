@@ -11,7 +11,7 @@ export async function compareBeforeAfterPhotos(
   beforePhotoUrl: string,
   afterPhotoUrl: string
 ): Promise<ResolutionValidation> {
-  const ai = new GoogleGenAI({});
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   const prompt = `
 You are a civic issue resolution validator. You will see two photos:

@@ -1,3 +1,7 @@
+if (process.env.NODE_ENV === 'production') {
+  throw new Error('Test scripts cannot run in production');
+}
+
 import * as admin from 'firebase-admin';
 
 // No extra env vars needed for test (Cloud function uses its own .env)

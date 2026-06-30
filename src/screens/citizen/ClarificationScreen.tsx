@@ -3,6 +3,7 @@ import { HelpCircle, ChevronRight, Loader2 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { CitizenScreenType } from './CitizenRouter';
+import Toast, { ToastType } from '../../components/ui/Toast';
 
 interface ClarificationScreenProps {
   reportId: string;
@@ -14,6 +15,7 @@ export default function ClarificationScreen({ reportId, onNavigate }: Clarificat
   const [options, setOptions] = useState<string[]>(['Yes', 'No']);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -22,7 +24,6 @@ export default function ClarificationScreen({ reportId, onNavigate }: Clarificat
         if (snap.exists()) {
           const rawQuestion = snap.data().clarification_question;
           if (rawQuestion) {
-            // Parse "Question? / Option1 / Option2"
             const parts = rawQuestion.split('/').map((s: string) => s.trim());
             if (parts.length > 1) {
               setQuestion(parts[0]);
@@ -33,7 +34,7 @@ export default function ClarificationScreen({ reportId, onNavigate }: Clarificat
           }
         }
       } catch (e) {
-        console.error("Failed to fetch clarification question", e);
+        setToast({ message: 'Could not load clarification question.', type: 'error' });
       } finally {
         setLoading(false);
       }
@@ -47,7 +48,6 @@ export default function ClarificationScreen({ reportId, onNavigate }: Clarificat
       const snap = await getDoc(doc(db, 'reports', reportId));
       const currentDesc = snap.data()?.description || '';
       
-      // We append the answer so the AI has context if it runs again
       const newDesc = currentDesc 
         ? `${currentDesc}\n[Clarification: ${answer}]`
         : `[Clarification: ${answer}]`;
@@ -55,37 +55,38 @@ export default function ClarificationScreen({ reportId, onNavigate }: Clarificat
       await updateDoc(doc(db, 'reports', reportId), {
         clarification_answer: answer,
         description: newDesc,
-        status: 'NEW' // Reset status so CF1 can re-process
+        status: 'NEW'
       });
       
       onNavigate('submission-pending', reportId);
     } catch (e) {
-      console.error("Failed to submit clarification", e);
+      setToast({ message: 'Failed to submit clarification. Please try again.', type: 'error' });
       setSubmitting(false);
     }
   };
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-50">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-50 text-zinc-900 font-sans p-6">
+    <div className="flex flex-col h-screen bg-background text-text-primary font-sans p-6">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <div className="flex-1 flex flex-col items-center justify-center max-w-sm mx-auto w-full space-y-8">
         
-        <div className="h-20 w-20 bg-amber-100 rounded-full flex items-center justify-center">
-          <HelpCircle className="h-10 w-10 text-amber-500" />
+        <div className="h-20 w-20 bg-status-warning/10 rounded-full flex items-center justify-center">
+          <HelpCircle className="h-10 w-10 text-status-warning" />
         </div>
         
         <div className="text-center space-y-2">
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-900">
+          <h2 className="text-screen-title text-text-primary">
             More Info Needed
           </h2>
-          <p className="text-zinc-500 font-medium text-lg leading-snug">
+          <p className="text-body-lg text-text-secondary font-medium leading-snug">
             {question}
           </p>
         </div>
@@ -96,10 +97,10 @@ export default function ClarificationScreen({ reportId, onNavigate }: Clarificat
               key={idx}
               onClick={() => handleSelectOption(opt)}
               disabled={submitting}
-              className="w-full flex items-center justify-between bg-white border border-zinc-200 text-zinc-800 p-5 rounded-2xl font-semibold hover:border-blue-400 hover:shadow-sm transition disabled:opacity-50"
+              className="w-full flex items-center justify-between bg-surface border border-border text-text-primary p-5 rounded-xl font-semibold hover:border-primary/50 hover:shadow-sm transition disabled:opacity-50"
             >
               <span>{opt}</span>
-              <ChevronRight className="h-5 w-5 text-zinc-400" />
+              <ChevronRight className="h-5 w-5 text-text-secondary" />
             </button>
           ))}
         </div>

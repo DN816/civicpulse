@@ -1,8 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Clock, MapPin, CalendarDays, AlertTriangle, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
-import { auth, db } from '../../config/firebase';
-import { doc, getDoc, collection, query, where, getDocs, updateDoc, Timestamp, addDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db, storage } from '../../config/firebase';
+import { ref, getDownloadURL } from 'firebase/storage';
+import { doc, getDoc, collection, query, where, getDocs, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { AuthorityScreenType } from './AuthorityRouter';
+import { Cluster, Report } from '../../types';
+import { normalizeClusterStatus } from '../../utils/clusterStatus';
+import Card from '../../components/ui/Card';
+import SeverityBadge from '../../components/ui/SeverityBadge';
+import StatusBadge from '../../components/ui/StatusBadge';
+import Button from '../../components/ui/Button';
+import Toast, { ToastType } from '../../components/ui/Toast';
 
 interface IssueDetailScreenProps {
   clusterId: string;
@@ -10,47 +18,53 @@ interface IssueDetailScreenProps {
 }
 
 export default function IssueDetailScreen({ clusterId, onNavigate }: IssueDetailScreenProps) {
-  const [cluster, setCluster] = useState<any>(null);
-  const [report, setReport] = useState<any>(null); // To get the photo
-  const [disputeCount, setDisputeCount] = useState<number>(0);
+  const [cluster, setCluster] = useState<Cluster | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
+  const [afterPhotoUrl, setAfterPhotoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // 1. Fetch Cluster
         const cSnap = await getDoc(doc(db, 'clusters', clusterId));
         if (cSnap.exists()) {
-          setCluster({ id: cSnap.id, ...cSnap.data() });
+          setCluster({ id: cSnap.id, ...cSnap.data() } as Cluster);
         }
 
-        // 2. Fetch first Report to get photo
         const rQuery = query(collection(db, 'reports'), where('cluster_id', '==', clusterId));
         const rSnap = await getDocs(rQuery);
         if (!rSnap.empty) {
-          setReport({ id: rSnap.docs[0].id, ...rSnap.docs[0].data() });
+          setReport({ id: rSnap.docs[0].id, ...rSnap.docs[0].data() } as Report);
         }
 
-        // 3. Fetch dispute count if AWAITING_CONFIRMATION
-        const currentStatus = cSnap.data()?.status?.toUpperCase();
-        if (currentStatus === 'AWAITING_CONFIRMATION') {
-          // In CF3, we open dispute window. We need the current resolution_attempt from the report
-          const attempt = rSnap.empty ? 1 : (rSnap.docs[0].data().resolution_attempt || 1);
-          const reportIdForVotes = rSnap.empty ? '' : rSnap.docs[0].id;
-          
-          if (reportIdForVotes) {
-            const votesQuery = query(
-              collection(db, 'dispute_votes'),
-              where('report_id', '==', reportIdForVotes),
-              where('resolution_attempt', '==', attempt)
-            );
-            const votesSnap = await getDocs(votesQuery);
-            setDisputeCount(votesSnap.size);
+        const eventsQuery = query(
+          collection(db, 'report_events'),
+          where('cluster_id', '==', clusterId)
+        );
+        const eventsSnap = await getDocs(eventsQuery);
+        const events = eventsSnap.docs
+          .map(d => d.data())
+          .filter(e => e.event_type === 'work_completed' && e.after_photo_url)
+          .sort((a, b) => (b.created_at?.toMillis() || 0) - (a.created_at?.toMillis() || 0));
+        if (events.length > 0) {
+          setAfterPhotoUrl(events[0].after_photo_url);
+        } else if (rSnap.docs[0]?.id) {
+          const extensions = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
+          for (const ext of extensions) {
+            try {
+              const storageRef = ref(storage, `reports/${rSnap.docs[0].id}/after.${ext}`);
+              const url = await getDownloadURL(storageRef);
+              setAfterPhotoUrl(url);
+              break;
+            } catch {
+              continue;
+            }
           }
         }
       } catch (err) {
-        console.error("Error fetching detail data", err);
+        setToast({ message: 'Could not load issue details.', type: 'error' });
       } finally {
         setLoading(false);
       }
@@ -58,177 +72,176 @@ export default function IssueDetailScreen({ clusterId, onNavigate }: IssueDetail
     fetchData();
   }, [clusterId]);
 
-  const updateStatus = async (newStatus: string, eventType: string) => {
+  const updateStatus = async (
+    clusterStatus: string,
+    reportStatus: string,
+    eventType: string,
+    setAuthority = false
+  ) => {
     setActionLoading(true);
-    try {
+    const authorityId = auth.currentUser?.uid ?? null;
 
-      
-      // Update cluster status
-      await updateDoc(doc(db, 'clusters', clusterId), { status: newStatus });
-      
-      // Update ALL linked reports status
+    try {
+      const clusterUpdate: Record<string, unknown> = {
+        status: clusterStatus,
+        updated_at: serverTimestamp(),
+      };
+      if (setAuthority && authorityId) {
+        clusterUpdate.authority_id = authorityId;
+      }
+
+      await updateDoc(doc(db, 'clusters', clusterId), clusterUpdate);
+
       const rQuery = query(collection(db, 'reports'), where('cluster_id', '==', clusterId));
       const rSnap = await getDocs(rQuery);
-      
-      const updatePromises = rSnap.docs.map(rDoc => 
-        updateDoc(doc(db, 'reports', rDoc.id), { status: newStatus })
+
+      const reportUpdate: Record<string, unknown> = {
+        status: reportStatus,
+        updated_at: serverTimestamp(),
+      };
+      if (setAuthority && authorityId) {
+        reportUpdate.authority_id = authorityId;
+      }
+
+      const updatePromises = rSnap.docs.map((rDoc) =>
+        updateDoc(doc(db, 'reports', rDoc.id), reportUpdate)
       );
-      
-      // Add report event
+
       const eventPromise = addDoc(collection(db, 'report_events'), {
         event_type: eventType,
         report_id: report?.id || '',
         cluster_id: clusterId,
-        authority_id: auth.currentUser?.uid,
-        created_at: serverTimestamp()
+        authority_id: authorityId,
+        created_at: serverTimestamp(),
       });
 
       await Promise.all([...updatePromises, eventPromise]);
-      
-      // Refresh local state
-      setCluster(prev => ({ ...prev, status: newStatus }));
+      setCluster((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: clusterStatus as Cluster['status'],
+              ...(setAuthority && authorityId ? { authority_id: authorityId } : {}),
+            }
+          : prev
+      );
     } catch (err) {
-      console.error("Error updating status", err);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Failed to update issue status', err);
+      setToast({ message: `Failed to update issue status: ${msg}`, type: 'error' });
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleAcknowledge = () => updateStatus('ASSIGNED', 'acknowledge');
-  const handleStartWork = () => updateStatus('IN_PROGRESS', 'work_started');
+  const handleAcknowledge = () => updateStatus('assigned', 'ASSIGNED', 'acknowledge', true);
+  const handleStartWork = () => updateStatus('in_progress', 'IN_PROGRESS', 'work_started', true);
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-screen bg-[#F4F6F9]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-200 border-t-blue-600" />
+      <div className="flex justify-center items-center h-screen bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-primary" />
       </div>
     );
   }
 
   if (!cluster) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#F4F6F9]">
-        <AlertCircle className="h-10 w-10 text-red-500 mb-2" />
-        <h2 className="text-xl font-bold">Issue Not Found</h2>
-        <button onClick={() => onNavigate('dashboard')} className="mt-4 text-blue-600">Back to Dashboard</button>
+      <div className="flex flex-col items-center justify-center h-screen bg-background space-y-3">
+        <AlertCircle className="h-12 w-12 text-severity-high" />
+        <h2 className="text-section-title text-text-primary">Issue Not Found</h2>
+        <Button variant="text" onClick={() => onNavigate('dashboard')}>Back to Dashboard</Button>
       </div>
     );
   }
 
-  const status = cluster.status?.toUpperCase() || 'NEW';
+  const status = normalizeClusterStatus(cluster.status);
   const severity = cluster.severity || 'Medium';
 
-  const getSeverityBadge = () => {
-    switch (severity) {
-      case 'High': return 'bg-red-50 text-red-600 border-red-100';
-      case 'Medium': return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'Low': return 'bg-green-50 text-green-600 border-green-100';
-      default: return 'bg-zinc-50 text-zinc-600 border-zinc-100';
-    }
-  };
+  const daysOpen = cluster.created_at
+    ? Math.floor((Date.now() - cluster.created_at.toMillis()) / (1000 * 60 * 60 * 24))
+    : 0;
 
-  const getStatusBadge = () => {
-    switch (status) {
-      case 'NEW':
-      case 'ACTIVE':
-        return 'bg-zinc-100 text-zinc-600';
-      case 'ASSIGNED':
-      case 'IN_PROGRESS':
-      case 'APPROVED':
-        return 'bg-blue-100 text-blue-700';
-      case 'AWAITING_CONFIRMATION':
-      case 'ESCALATED':
-        return 'bg-amber-100 text-amber-700';
-      case 'RESOLVED':
-        return 'bg-green-100 text-green-700';
-      case 'REOPENED':
-        return 'bg-red-100 text-red-700';
-      default:
-        return 'bg-zinc-100 text-zinc-600';
-    }
-  };
-
-  const daysOpen = cluster.created_at ? Math.floor((Date.now() - cluster.created_at.toMillis()) / (1000 * 60 * 60 * 24)) : 0;
-  
   let slaText = 'No SLA';
-  let slaColor = 'text-zinc-400';
+  let slaColor = 'text-text-secondary';
   if (cluster.sla_deadline) {
     const diff = cluster.sla_deadline.toMillis() - Date.now();
     const hours = Math.floor(diff / (1000 * 60 * 60));
     if (hours < 0) {
       slaText = `${Math.abs(hours)}h overdue`;
-      slaColor = 'text-red-600 font-bold';
+      slaColor = 'text-severity-high font-bold';
     } else if (hours < 24) {
       slaText = `${hours}h remaining`;
-      slaColor = 'text-amber-600 font-bold';
+      slaColor = 'text-status-warning font-bold';
     } else {
       slaText = `${Math.floor(hours / 24)}d remaining`;
-      slaColor = 'text-zinc-500';
+      slaColor = 'text-text-secondary';
     }
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#F4F6F9] text-zinc-900 font-sans pb-24">
-      {/* Header */}
-      <header className="flex h-16 shrink-0 items-center border-b border-zinc-200 bg-white px-4 shadow-sm sticky top-0 z-10">
-        <button
-          onClick={() => onNavigate('dashboard')}
-          className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-zinc-100 text-zinc-500 transition"
-        >
+    <div className="flex flex-col min-h-screen bg-background text-text-primary font-sans pb-24">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      <header className="flex h-16 shrink-0 items-center border-b border-border bg-surface px-4 shadow-sm sticky top-0 z-10">
+        <Button variant="icon" onClick={() => onNavigate('dashboard')}>
           <ArrowLeft className="h-5 w-5" />
-        </button>
-        <span className="font-bold tracking-tight text-lg ml-2">{cluster.category || 'Issue Detail'}</span>
+        </Button>
+        <span className="text-section-title ml-2">{cluster.category || 'Issue Detail'}</span>
       </header>
 
-      {/* Before Photo */}
-      {report?.photo_url && (
-        <div className="w-full h-[220px] bg-zinc-200 relative">
-          <img src={report.photo_url} alt="Civic Issue" className="w-full h-full object-cover" />
-        </div>
-      )}
-
-      {/* Main Content */}
       <main className="p-4 lg:p-6 max-w-2xl mx-auto w-full space-y-4">
-        
-        {/* Escalation History */}
-        {status === 'ESCALATED' && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+        {report?.photo_url && (
+          <section className="bg-surface rounded-2xl overflow-hidden shadow-sm border border-border">
+            <div className="relative aspect-video bg-background">
+              <img src={report.photo_url} alt="Civic Issue" className="w-full h-full object-cover" />
+              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md text-white px-3 py-1 rounded-full text-xs font-bold tracking-wide">
+                BEFORE
+              </div>
+            </div>
+            {status === 'resolved' && (afterPhotoUrl || cluster?.after_photo_url || report?.after_photo_url) && (
+              <div className="relative aspect-video bg-background mt-3">
+                <img src={afterPhotoUrl || cluster?.after_photo_url || report?.after_photo_url!} alt="After" className="w-full h-full object-cover" />
+                <div className="absolute top-3 left-3 bg-status-success text-white px-3 py-1 rounded-full text-xs font-bold tracking-wide">
+                  AFTER
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {status === 'escalated' && (
+          <div className="bg-status-warning/10 border border-status-warning/20 rounded-xl p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-status-warning shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-semibold text-amber-900">Escalated Issue</h4>
-              <p className="text-sm text-amber-700 mt-1">This issue has missed its SLA deadline and was escalated to higher authorities.</p>
+              <h4 className="font-semibold text-text-primary">Escalated Issue</h4>
+              <p className="text-body-md text-text-secondary mt-1">This issue has missed its SLA deadline and was escalated to higher authorities.</p>
             </div>
           </div>
         )}
 
-        {/* Info Card */}
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm space-y-4">
+        <Card className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`px-2.5 py-1 rounded-full text-[12px] font-semibold border ${getSeverityBadge()}`}>
-              {severity} SEVERITY
-            </span>
-            <span className={`px-2.5 py-1 rounded-full text-[12px] font-semibold ${getStatusBadge()}`}>
-              {status}
-            </span>
+            <SeverityBadge severity={severity} />
+            <StatusBadge status={status} />
           </div>
 
           <div className="grid grid-cols-2 gap-4 pt-2">
             <div>
-              <p className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">Affected</p>
-              <div className="flex items-center gap-1.5 font-medium text-zinc-900">
-                <MapPin className="h-4 w-4 text-zinc-400" />
+              <p className="text-caption font-semibold text-text-secondary uppercase tracking-wider mb-1">Affected</p>
+              <div className="flex items-center gap-1.5 font-medium text-text-primary">
+                <MapPin className="h-4 w-4 text-text-secondary" />
                 {cluster.affected_count} citizens
               </div>
             </div>
             <div>
-              <p className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">Days Open</p>
-              <div className="flex items-center gap-1.5 font-medium text-zinc-900">
-                <CalendarDays className="h-4 w-4 text-zinc-400" />
+              <p className="text-caption font-semibold text-text-secondary uppercase tracking-wider mb-1">Days Open</p>
+              <div className="flex items-center gap-1.5 font-medium text-text-primary">
+                <CalendarDays className="h-4 w-4 text-text-secondary" />
                 {daysOpen} days
               </div>
             </div>
             <div className="col-span-2">
-              <p className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">SLA Deadline</p>
+              <p className="text-caption font-semibold text-text-secondary uppercase tracking-wider mb-1">SLA Deadline</p>
               <div className={`flex items-center gap-1.5 font-medium ${slaColor}`}>
                 <Clock className="h-4 w-4" />
                 {slaText}
@@ -236,58 +249,39 @@ export default function IssueDetailScreen({ clusterId, onNavigate }: IssueDetail
             </div>
           </div>
 
-          <div className="pt-4 border-t border-zinc-100 flex justify-between items-center">
-            <p className="text-[12px] text-zinc-500 font-mono">PRIORITY_SCORE: {cluster.priority_score}</p>
+          <div className="pt-4 border-t border-border flex justify-between items-center">
+            <p className="text-caption text-text-secondary font-mono">PRIORITY_SCORE: {cluster.priority_score}</p>
           </div>
-        </div>
+        </Card>
 
-        {/* Status Timeline / Resolved info */}
-        {status === 'RESOLVED' && report?.resolution_validation && (
-          <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm space-y-3">
-            <h3 className="font-semibold text-zinc-900 flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+        {status === 'resolved' && report?.resolution_validation && (
+          <Card className="space-y-3">
+            <h3 className="font-semibold text-text-primary flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-status-success" />
               Resolved
             </h3>
-            <p className="text-sm text-zinc-600">AI Validation: {report.resolution_validation.reasoning}</p>
-          </div>
+            <p className="text-body-md text-text-secondary">AI Validation: {report.resolution_validation.reasoning}</p>
+          </Card>
         )}
       </main>
 
-      {/* Action Bar (Pinned Bottom) */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 p-4 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-20">
+      <div className="fixed bottom-0 left-0 right-0 bg-surface border-t border-border p-4 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-20">
         <div className="max-w-2xl mx-auto flex justify-center w-full">
-          {status === 'NEW' || status === 'APPROVED' || status === 'ACTIVE' ? (
-            <button
-              onClick={handleAcknowledge}
-              disabled={actionLoading}
-              className="w-full h-12 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-lg flex justify-center items-center gap-2"
-            >
+          {status === 'active' || status === 'in_review' ? (
+            <Button onClick={handleAcknowledge} disabled={actionLoading} fullWidth>
               {actionLoading ? <RefreshCw className="h-5 w-5 animate-spin" /> : 'Acknowledge'}
-            </button>
-          ) : status === 'ASSIGNED' ? (
-            <button
-              onClick={handleStartWork}
-              disabled={actionLoading}
-              className="w-full h-12 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-lg flex justify-center items-center gap-2"
-            >
+            </Button>
+          ) : status === 'assigned' ? (
+            <Button onClick={handleStartWork} disabled={actionLoading} fullWidth>
               {actionLoading ? <RefreshCw className="h-5 w-5 animate-spin" /> : 'Start Work'}
-            </button>
-          ) : status === 'IN_PROGRESS' || status === 'REOPENED' || status === 'ESCALATED' ? (
-            <button
-              onClick={() => onNavigate('mark-resolved', clusterId)}
-              className="w-full h-12 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-lg flex justify-center items-center gap-2"
-            >
+            </Button>
+          ) : status === 'in_progress' || status === 'reopened' || status === 'escalated' ? (
+            <Button onClick={() => onNavigate('mark-resolved', clusterId)} fullWidth>
               Mark Resolved
-            </button>
-          ) : status === 'AWAITING_CONFIRMATION' ? (
-            <div className="w-full text-center py-2 px-4 bg-amber-50 rounded-lg border border-amber-200">
-              <p className="text-amber-800 font-medium text-sm">
-                {disputeCount} {disputeCount === 1 ? 'citizen' : 'citizens'} disputed — awaiting window close
-              </p>
-            </div>
-          ) : status === 'RESOLVED' ? (
+            </Button>
+          ) : status === 'resolved' ? (
             <div className="w-full text-center py-2 px-4">
-              <p className="text-zinc-500 font-medium text-sm">Resolved</p>
+              <p className="text-text-secondary font-medium text-body-md">Resolved</p>
             </div>
           ) : null}
         </div>

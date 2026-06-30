@@ -4,7 +4,7 @@ exports.compareBeforeAfterPhotos = compareBeforeAfterPhotos;
 const genai_1 = require("@google/genai");
 const gemini_1 = require("./gemini");
 async function compareBeforeAfterPhotos(beforePhotoUrl, afterPhotoUrl) {
-    const ai = new genai_1.GoogleGenAI({});
+    const ai = new genai_1.GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `
 You are a civic issue resolution validator. You will see two photos:
 1. A BEFORE photo showing a civic issue (pothole, leak, damage, etc.)

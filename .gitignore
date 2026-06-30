@@ -7,3 +7,11 @@ coverage/
 .env*
 !.env.example
 serviceAccount.json
+e2e/.auth/*.json
+.tmp-auth-export.json
+.cursor/mcp.json
+scripts/.stitch-export/
+scripts/.stitch-screens.json
+test-results/
+users.csv
+updateAuthorities.js

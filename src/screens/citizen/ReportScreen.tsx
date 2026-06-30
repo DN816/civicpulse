@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, MapPin, AlertCircle, ArrowLeft, UploadCloud, XCircle } from 'lucide-react';
+import { Camera, MapPin, AlertCircle, XCircle, Send, Crosshair } from 'lucide-react';
 import { auth, db, storage } from '../../config/firebase';
-import { collection, doc, setDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { CitizenScreenType } from './CitizenRouter';
+import { reverseGeocode } from '../../utils/nominatim';
+import CitizenHeader from '../../components/citizen/CitizenHeader';
+import LocationPicker from '../../components/ui/LocationPicker';
 
 interface ReportScreenProps {
   onNavigate: (screen: CitizenScreenType, reportId?: string) => void;
@@ -13,63 +16,105 @@ export default function ReportScreen({ onNavigate }: ReportScreenProps) {
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [description, setDescription] = useState('');
-  
-  const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [geoAccuracy, setGeoAccuracy] = useState<number | null>(null);
   const [address, setAddress] = useState<string>('Detecting location...');
   const [locationError, setLocationError] = useState<string | null>(null);
-  
+  const [userAdjustedLocation, setUserAdjustedLocation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const gpsLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Auto-detect GPS on mount
+    return () => {
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
+    };
+  }, [photoUrl]);
+
+  useEffect(() => {
     if (!navigator.geolocation) {
-      setLocationError("Location not supported by your browser.");
+      setLocationError('Location not supported by your browser.');
       setAddress('');
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
+    let watchId: number;
+    let bestAccuracy = Infinity;
+    let settled = false;
+
+    const onSuccess = async (position: GeolocationPosition) => {
+      const { latitude, longitude, accuracy } = position.coords;
+
+      gpsLocationRef.current = { lat: latitude, lng: longitude };
+      setGeoAccuracy(accuracy);
+      setLocationError(null);
+
+      if (!userAdjustedLocation) {
         setLocation({ lat: latitude, lng: longitude });
-        setGeoAccuracy(accuracy);
-        setLocationError(null);
-        
-        // Reverse geocoding via OpenStreetMap (Nominatim)
+      }
+
+      if (accuracy < bestAccuracy) {
+        bestAccuracy = accuracy;
         try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-          if (!res.ok) throw new Error('Geocoding failed');
-          const data = await res.json();
-          // Provide a concise address label
-          const displayAddress = data.address?.road 
-            ? `${data.address.road}, ${data.address.city || data.address.town || data.address.suburb || ''}`
-            : data.display_name;
-          setAddress(displayAddress);
-        } catch (error) {
-          console.error("Geocoding error:", error);
+          setAddress(await reverseGeocode(latitude, longitude));
+        } catch {
           setAddress(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
         }
-      },
-      (error) => {
-        console.error("Geolocation error:", error);
-        setLocationError("Location not detected — please enable location access.");
-        setAddress('');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  }, []);
+      }
+    };
+
+    const onError = () => {
+      if (!settled) {
+        setLocationError('Location not detected — please enable location access.');
+      }
+    };
+
+    watchId = navigator.geolocation.watchPosition(onSuccess, onError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 5000,
+    });
+
+    return () => {
+      settled = true;
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [userAdjustedLocation]);
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
       setPhoto(file);
-      const objUrl = URL.createObjectURL(file);
-      setPhotoUrl(objUrl);
+      setPhotoUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const clearPhoto = () => {
+    if (photoUrl) URL.revokeObjectURL(photoUrl);
+    setPhoto(null);
+    setPhotoUrl(null);
+  };
+
+  const handleLocationChange = (newLat: number, newLng: number) => {
+    setLocation({ lat: newLat, lng: newLng });
+    setUserAdjustedLocation(true);
+    reverseGeocode(newLat, newLng)
+      .then(setAddress)
+      .catch(() => setAddress(`${newLat.toFixed(5)}, ${newLng.toFixed(5)}`));
+  };
+
+  const handleRecenter = () => {
+    if (gpsLocationRef.current) {
+      const { lat, lng } = gpsLocationRef.current;
+      setLocation({ lat, lng });
+      setUserAdjustedLocation(false);
+      reverseGeocode(lat, lng)
+        .then(setAddress)
+        .catch(() => setAddress(`${lat.toFixed(5)}, ${lng.toFixed(5)}`));
     }
   };
 
@@ -80,42 +125,61 @@ export default function ReportScreen({ onNavigate }: ReportScreenProps) {
 
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error("Not logged in");
+      if (!user) throw new Error('Not logged in');
 
-      // Generate a new report ID (Firestore document ID)
+      await user.getIdToken(true);
+      await new Promise((r) => setTimeout(r, 500));
+
+      const tokenResult = await user.getIdTokenResult();
+      if (tokenResult.claims.role !== 'citizen') {
+        throw new Error('Your account does not have the citizen role. Please contact support.');
+      }
+
       const reportRef = doc(collection(db, 'reports'));
       const reportId = reportRef.id;
-
-      // 1. Upload photo to Cloud Storage
       const ext = photo.name.split('.').pop() || 'jpg';
       const storageRef = ref(storage, `reports/${user.uid}/${reportId}/before.${ext}`);
-      
-      const uploadResult = await uploadBytes(storageRef, photo);
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
 
-      // 2. Create report document in Firestore
-      // Fields must match what CF1 reads: top-level lat, lng, geo_accuracy_meters
-      const newReportData = {
+      let downloadUrl: string;
+      try {
+        const uploadResult = await uploadBytes(storageRef, photo);
+        downloadUrl = await getDownloadURL(uploadResult.ref);
+      } catch {
+        throw new Error('Photo upload failed. Please try again.');
+      }
+
+      const newReportData: Record<string, unknown> = {
+        id: reportId,
         citizen_id: user.uid,
+        category: '',
+        severity: 'Low' as const,
         status: 'NEW',
         photo_url: downloadUrl,
         lat: location.lat,
         lng: location.lng,
-        geo_accuracy_meters: geoAccuracy ?? 50,
         description: description.trim(),
         device_timestamp: Timestamp.now(),
         created_at: Timestamp.now(),
-        affected_citizen_ids: [user.uid]
+        updated_at: serverTimestamp(),
+        affected_citizen_ids: [user.uid],
       };
 
-      await setDoc(reportRef, newReportData);
+      if (geoAccuracy != null) {
+        newReportData.geo_accuracy_meters = geoAccuracy;
+      } else {
+        newReportData.geo_accuracy_unknown = true;
+      }
 
-      // 3. Navigate to pending screen
+      try {
+        await setDoc(reportRef, newReportData);
+      } catch {
+        throw new Error('Failed to submit report. Please try again.');
+      }
+
       onNavigate('submission-pending', reportId);
-
-    } catch (error) {
-      console.error("Submission failed:", error);
-      setSubmitError("Photo upload failed. Please try again.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setSubmitError(msg);
       setIsSubmitting(false);
     }
   };
@@ -123,136 +187,142 @@ export default function ReportScreen({ onNavigate }: ReportScreenProps) {
   const isSubmitEnabled = !!photo && !!location && !isSubmitting;
 
   return (
-    <div className="flex flex-col min-h-screen bg-white text-zinc-900 font-sans pb-8">
-      {/* Header */}
-      <header className="flex h-16 shrink-0 items-center border-b border-zinc-200 bg-white px-4 sticky top-0 z-10">
-        <button onClick={() => onNavigate('home')} className="p-2 -ml-2 text-zinc-500 hover:text-zinc-900 transition">
-          <ArrowLeft className="h-6 w-6" />
-        </button>
-        <h1 className="text-xl font-bold tracking-tight ml-2">Report a Problem</h1>
-      </header>
+    <div className="flex min-h-screen flex-col bg-background pb-8 font-sans text-text-primary">
+      <CitizenHeader showBack onBack={() => onNavigate('home')} title="New Report" subtitle="Document an issue to earn Hero XP!" />
 
-      <main className="flex-1 p-6 max-w-lg mx-auto w-full space-y-8">
-        
-        {/* Photo Section */}
-        <section className="space-y-3">
-          <p className="font-semibold text-zinc-800">Take a photo of the civic issue.</p>
-          
-          <div className="w-full flex flex-col items-center">
-            {photoUrl ? (
-              <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden shadow-sm border border-zinc-200 bg-zinc-100">
-                <img src={photoUrl} alt="Issue" className="w-full h-full object-cover" />
-                <button 
-                  onClick={() => { setPhoto(null); setPhotoUrl(null); }}
-                  className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full backdrop-blur-sm transition"
-                >
-                  <XCircle className="h-5 w-5" />
-                </button>
+      <main className="mx-auto w-full max-w-lg flex-1 space-y-6 px-4 py-8">
+        <section>
+          {photoUrl ? (
+            <div className="relative aspect-video overflow-hidden rounded-xl border-4 border-border shadow-[4px_4px_0_0_var(--cp-border)]">
+              <img src={photoUrl} alt="Issue" className="h-full w-full object-cover" />
+              <button
+                type="button"
+                onClick={clearPhoto}
+                className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-border text-white shadow-lg"
+                aria-label="Remove photo"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="playful-dash group flex aspect-video w-full flex-col items-center justify-center bg-surface-container p-6 text-center"
+            >
+              <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full border-4 border-border bg-primary-container shadow-[4px_4px_0_0_var(--cp-border)] transition-transform group-hover:scale-110">
+                <Camera className="h-10 w-10 text-primary-dark" />
               </div>
-            ) : (
-              <div className="w-full space-y-4">
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex flex-col items-center justify-center gap-3 bg-zinc-50 border-2 border-dashed border-zinc-300 rounded-2xl p-8 hover:bg-zinc-100 hover:border-zinc-400 transition"
-                >
-                  <Camera className="h-10 w-10 text-zinc-400" />
-                  <span className="font-medium text-zinc-600">Take Photo</span>
-                </button>
-                <div className="text-center">
-                  <button 
-                    onClick={() => galleryInputRef.current?.click()}
-                    className="text-blue-600 underline font-medium text-sm hover:text-blue-700"
-                  >
-                    Upload from gallery
-                  </button>
-                </div>
-              </div>
-            )}
-            
-            {/* Hidden inputs */}
-            <input 
-              type="file" 
-              accept="image/*" 
-              capture="environment"
-              className="hidden" 
-              ref={fileInputRef}
-              onChange={handlePhotoSelect}
-            />
-            <input 
-              type="file" 
-              accept="image/*" 
-              className="hidden" 
-              ref={galleryInputRef}
-              onChange={handlePhotoSelect}
-            />
-          </div>
+              <h3 className="font-display text-xl font-semibold">Capture Evidence</h3>
+              <p className="mt-2 px-4 text-base text-on-surface-variant">Take a photo to activate AI detection</p>
+            </button>
+          )}
+
+          {!photoUrl && (
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={() => galleryInputRef.current?.click()}
+                className="text-sm font-bold text-tertiary underline"
+              >
+                Upload from gallery
+              </button>
+            </div>
+          )}
+
+          <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef} onChange={handlePhotoSelect} />
+          <input type="file" accept="image/*" className="hidden" ref={galleryInputRef} onChange={handlePhotoSelect} />
         </section>
 
-        {/* Location Section */}
-        <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-5 w-5 text-zinc-500" />
-            <h3 className="font-semibold text-zinc-800">Location</h3>
+        <section className="space-y-2">
+          <label htmlFor="description" className="ml-1 text-sm font-bold text-on-surface-variant">
+            Report Description
+          </label>
+          <textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Add some notes for the village council..."
+            rows={3}
+            className="w-full resize-none rounded-xl border-4 border-border bg-surface-container-lowest p-4 text-base shadow-[4px_4px_0_0_var(--cp-border)] outline-none focus:ring-0"
+          />
+        </section>
+
+        <section className="space-y-2">
+          <div className="mb-1 flex items-center justify-between">
+            <h2 className="ml-1 text-sm font-bold text-on-surface-variant">Current Coordinates</h2>
+            <span className="flex items-center gap-1 text-sm font-bold text-primary">
+              <Crosshair className="h-4 w-4" />
+              {geoAccuracy != null
+                ? `GPS ${geoAccuracy <= 10 ? '±10m' : geoAccuracy <= 30 ? '±30m' : geoAccuracy <= 100 ? '±100m' : '±100m+'}`
+                : 'GPS'}
+            </span>
           </div>
-          
+
           {locationError ? (
-            <div className="flex gap-3 bg-red-50 text-red-700 p-4 rounded-xl border border-red-100">
+            <div className="flex gap-3 rounded-xl border-2 border-border bg-severity-high-bg p-4 text-severity-high">
               <AlertCircle className="h-5 w-5 shrink-0" />
               <p className="text-sm font-medium">{locationError}</p>
             </div>
           ) : (
-            <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200">
-              <p className="text-sm text-zinc-700 font-medium">{address}</p>
+            <>
               {location && (
-                <p className="text-xs text-zinc-400 mt-1">
-                  GPS: {location.lat.toFixed(5)}, {location.lng.toFixed(5)}
-                </p>
+                <LocationPicker
+                  lat={location.lat}
+                  lng={location.lng}
+                  onLocationChange={handleLocationChange}
+                  onRecenter={handleRecenter}
+                />
               )}
-            </div>
+              <div className="flex items-center gap-2 mt-2">
+                <div className="flex items-center gap-1.5 rounded-full border-2 border-border bg-surface-container-lowest px-3 py-1 shadow-[2px_2px_0_0_var(--cp-border)]">
+                  <MapPin className="h-4 w-4 text-primary shrink-0" />
+                  <span className="max-w-[220px] truncate text-xs font-bold">{address}</span>
+                </div>
+                {geoAccuracy != null && (
+                  <div className={`flex items-center gap-1 rounded-full border-2 border-border px-2.5 py-1 text-xs font-bold shadow-[2px_2px_0_0_var(--cp-border)] ${
+                    geoAccuracy <= 30
+                      ? 'bg-status-success text-white'
+                      : geoAccuracy <= 100
+                        ? 'bg-status-warning text-white'
+                        : 'bg-severity-high text-white'
+                  }`}>
+                    <Crosshair className="h-3 w-3" />
+                    {geoAccuracy.toFixed(0)}m
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          {geoAccuracy != null && geoAccuracy > 30 && (
+            <p className="text-xs text-on-surface-variant mt-1 ml-1">
+              GPS accuracy improving — wait for the badge to turn green for best results
+            </p>
           )}
         </section>
 
-        {/* Description Section */}
-        <section className="space-y-3">
-          <h3 className="font-semibold text-zinc-800">Description</h3>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe the issue (optional)"
-            className="w-full p-4 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition resize-none h-32"
-          />
+        {submitError && <p className="text-center text-sm font-medium text-severity-high">{submitError}</p>}
+
+        <section className="pt-2">
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!isSubmitEnabled}
+            className="neo-3d flex h-16 w-full items-center justify-center gap-3 rounded-xl border-4 border-border bg-primary font-display text-xl font-semibold text-text-inverse disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? (
+              <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            ) : (
+              <>
+                <Send className="h-6 w-6" />
+                REPORT
+              </>
+            )}
+          </button>
+          <p className="mt-4 text-center text-xs italic text-on-surface-variant">
+            +50 XP for verified reports. Heroes play by the rules.
+          </p>
         </section>
-
-        {/* Error State */}
-        {submitError && (
-          <div className="text-center text-sm font-medium text-red-600">
-            {submitError}
-          </div>
-        )}
-
-        {/* Submit Button */}
-        <button
-          onClick={handleSubmit}
-          disabled={!isSubmitEnabled}
-          className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${
-            isSubmitEnabled 
-              ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98]' 
-              : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
-          }`}
-        >
-          {isSubmitting ? (
-            <>
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              Uploading...
-            </>
-          ) : (
-            <>
-              <UploadCloud className="h-5 w-5" />
-              Submit Report
-            </>
-          )}
-        </button>
-
       </main>
     </div>
   );

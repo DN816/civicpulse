@@ -3,8 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifyReportPhoto = classifyReportPhoto;
 exports.fetchImageAsBase64 = fetchImageAsBase64;
 const genai_1 = require("@google/genai");
+const storageUrl_1 = require("./storageUrl");
 async function classifyReportPhoto(photoUrl, description) {
-    const ai = new genai_1.GoogleGenAI({});
+    const ai = new genai_1.GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `
 You are a civic issue classifier. Look at this photo and return a JSON object only.
 No preamble. No markdown. No explanation. Only the JSON object.
@@ -39,6 +40,7 @@ async function fetchImageAsBase64(url) {
     if (url.startsWith('data:image/')) {
         return url.split(',')[1];
     }
+    (0, storageUrl_1.assertFirebaseStorageUrl)(url, 'photo_url');
     const fetch = (await Promise.resolve().then(() => require('node-fetch'))).default;
     const response = await fetch(url, {
         headers: {

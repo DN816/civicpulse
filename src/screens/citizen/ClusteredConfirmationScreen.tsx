@@ -3,6 +3,8 @@ import { CheckCircle2, Users, FileText, Home, Loader2 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { CitizenScreenType } from './CitizenRouter';
+import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
 
 interface ClusteredConfirmationScreenProps {
   reportId: string;
@@ -23,8 +25,8 @@ export default function ClusteredConfirmationScreen({ reportId, onNavigate }: Cl
             setAffectedCount(clusterSnap.data().affected_count || 1);
           }
         }
-      } catch (e) {
-        console.error("Failed to fetch cluster for confirmation", e);
+      } catch {
+        // Fall back to default affected count
       } finally {
         setLoading(false);
       }
@@ -34,8 +36,8 @@ export default function ClusteredConfirmationScreen({ reportId, onNavigate }: Cl
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-50">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -45,46 +47,40 @@ export default function ClusteredConfirmationScreen({ reportId, onNavigate }: Cl
     : `You've been added to an existing report. ${affectedCount - 1} other citizen(s) have also reported this.`;
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-50 p-6 text-center font-sans">
-      <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full space-y-6 border border-zinc-100 flex flex-col items-center">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6 text-center font-sans">
+      <Card variant="elevated" className="gamified-card gamified-shadow max-w-sm w-full space-y-6 flex flex-col items-center p-8 bg-surface-container-lowest">
         
         <div className="relative">
-          <div className="h-20 w-20 bg-emerald-50 rounded-full flex items-center justify-center mb-2">
-            <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+          <div className="h-20 w-20 bg-severity-low-bg rounded-full flex items-center justify-center mb-2">
+            <CheckCircle2 className="h-10 w-10 text-status-success" />
           </div>
           {affectedCount > 1 && (
-            <div className="absolute -bottom-2 -right-2 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center border-4 border-white">
-              <Users className="h-4 w-4 text-blue-600" />
+            <div className="absolute -bottom-2 -right-2 h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center border-4 border-surface">
+              <Users className="h-4 w-4 text-primary" />
             </div>
           )}
         </div>
         
-        <h2 className="text-2xl font-bold tracking-tight text-zinc-900">
+        <h2 className="font-display text-3xl font-bold text-text-primary">
           Report Received
         </h2>
         
-        <p className="text-zinc-600 font-medium leading-relaxed">
+        <p className="text-body-md text-text-secondary leading-relaxed">
           {message}
         </p>
         
         <div className="w-full space-y-3 pt-4">
-          <button
-            onClick={() => onNavigate('report-detail', reportId)}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition shadow-sm"
-          >
+          <Button onClick={() => onNavigate('report-detail', reportId)} fullWidth>
             <FileText className="h-5 w-5" />
             View Report
-          </button>
+          </Button>
           
-          <button
-            onClick={() => onNavigate('home')}
-            className="w-full flex items-center justify-center gap-2 bg-zinc-100 text-zinc-700 py-4 rounded-xl font-bold hover:bg-zinc-200 transition"
-          >
+          <Button onClick={() => onNavigate('home')} variant="secondary" fullWidth>
             <Home className="h-5 w-5" />
             Go Home
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

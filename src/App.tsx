@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { auth } from './config/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Shield } from 'lucide-react';
+import CivicPulseLogo from './components/ui/CivicPulseLogo';
 import WelcomeScreen from './screens/shared/WelcomeScreen';
 import SignInScreen from './screens/shared/SignInScreen';
 import CreateAccountScreen from './screens/shared/CreateAccountScreen';
 import EmailVerificationScreen from './screens/shared/EmailVerificationScreen';
 import RoleRouter from './navigation/RoleRouter';
+import { needsEmailVerification } from './utils/authHelpers';
 
 type AppScreen = 'welcome' | 'signin' | 'create-account' | 'router' | 'verify-email';
 
@@ -30,8 +31,7 @@ export default function App() {
       setUser(currentUser);
       setIsAuthChecking(false);
       if (currentUser) {
-        // If email/password user with unverified email, go to verification screen
-        if (!currentUser.emailVerified && currentUser.providerData[0]?.providerId === 'password') {
+        if (needsEmailVerification(currentUser)) {
           setScreen('verify-email');
         } else {
           setScreen('router');
@@ -47,14 +47,10 @@ export default function App() {
   // While splash screen is active or auth is checking, show the branded Splash Screen
   if (isSplashActive || isAuthChecking) {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center bg-blue-600 text-white font-sans transition-all duration-500 ease-in-out">
+      <div className="flex h-screen w-screen flex-col items-center justify-center bg-primary text-text-inverse font-sans transition-all duration-500 ease-in-out">
         <div className="flex flex-col items-center space-y-4 animate-fade-in">
-          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/10 border border-white/20 shadow-xl">
-            <Shield className="h-10 w-10 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            CivicPulse
-          </h1>
+          <CivicPulseLogo size="lg" imageClassName="drop-shadow-lg" />
+          <h1 className="font-display text-3xl font-bold tracking-tight">CivicPulse</h1>
         </div>
       </div>
     );

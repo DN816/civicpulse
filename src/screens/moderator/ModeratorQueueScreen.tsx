@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, Shield, Clock, AlertTriangle, AlertCircle, SearchX } from 'lucide-react';
+import { LogOut, Clock, AlertTriangle, AlertCircle, SearchX } from 'lucide-react';
+import CivicPulseLogo from '../../components/ui/CivicPulseLogo';
 import { auth, db } from '../../config/firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { ModeratorScreenType } from './ModeratorRouter';
+import Card from '../../components/ui/Card';
+import SeverityBadge from '../../components/ui/SeverityBadge';
+import SkeletonLoader from '../../components/ui/SkeletonLoader';
+import Button from '../../components/ui/Button';
+import Toast, { ToastType } from '../../components/ui/Toast';
 
 interface ModeratorQueueScreenProps {
   onNavigate: (screen: ModeratorScreenType, reportId?: string) => void;
@@ -20,12 +26,13 @@ interface ReportData {
   trust_layer1?: number;
   locked_until?: Timestamp;
   moderator_id?: string;
-  [key: string]: any;
+  resolution_attempt?: number;
 }
 
 export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: ModeratorQueueScreenProps) {
   const [reports, setReports] = useState<ReportData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const currentUser = auth.currentUser;
 
   useEffect(() => {
@@ -51,6 +58,9 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
 
       setReports(data);
       setLoading(false);
+    }, (error) => {
+      setToast({ message: 'Could not load the review queue.', type: 'error' });
+      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -61,14 +71,7 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
     onNavigateOut('welcome');
   };
 
-  const getSeverityColors = (severity: string) => {
-    switch (severity) {
-      case 'High': return 'bg-red-50 text-red-600 border-red-100';
-      case 'Medium': return 'bg-amber-50 text-amber-600 border-amber-100';
-      case 'Low': return 'bg-green-50 text-green-600 border-green-100';
-      default: return 'bg-zinc-50 text-zinc-600 border-zinc-100';
-    }
-  };
+
 
   const getReasonTag = (report: ReportData) => {
     if (report.pii_flag) return { label: 'PII Flag', color: 'bg-red-100 text-red-700' };
@@ -84,7 +87,7 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
     const isLockedByOther = isLocked && report.moderator_id !== currentUser.uid;
 
     if (isLockedByOther) {
-      alert("This case is being reviewed by another moderator. Try again later.");
+      setToast({ message: 'This case is being reviewed by another moderator. Try again later.', type: 'info' });
       return;
     }
 
@@ -96,50 +99,50 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
         locked_until: Timestamp.fromDate(lockUntilDate)
       });
       onNavigate('review', report.id);
-    } catch (err) {
-      console.error("Failed to claim report:", err);
-      alert("Error claiming report. Please try again.");
+    } catch {
+      setToast({ message: 'Error claiming report. Please try again.', type: 'error' });
     }
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#F4F6F9] text-zinc-900 font-sans pb-8">
+    <div className="flex min-h-screen flex-col bg-background text-text-primary font-sans pb-8">
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+      )}
       {/* Header */}
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 shadow-sm sticky top-0 z-10">
+      <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-6 shadow-sm sticky top-0 z-10">
         <div className="flex items-center gap-3">
-          <Shield className="h-6 w-6 text-amber-500" />
+          <CivicPulseLogo size="sm" />
           <div className="flex items-center gap-2">
             <span className="font-bold tracking-tight text-lg leading-tight">Review Queue</span>
             {!loading && reports.length > 0 && (
-              <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+              <span className="bg-status-warning/10 text-status-warning text-[10px] font-bold px-2 py-0.5 rounded-full">
                 {reports.length}
               </span>
             )}
           </div>
         </div>
-        <button
+        <Button
           onClick={handleSignOut}
-          className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-900 transition text-sm font-medium"
+          variant="text"
         >
           <LogOut className="h-4 w-4" />
           Sign Out
-        </button>
+        </Button>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 lg:p-6 max-w-4xl mx-auto w-full space-y-4">
+      <main className="flex-1 p-4 lg:p-6 w-full max-w-7xl mx-auto space-y-4">
         {loading ? (
-          <div className="flex justify-center p-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-200 border-t-amber-500" />
-          </div>
+          <SkeletonLoader />
         ) : reports.length === 0 ? (
-          <div className="bg-white border border-zinc-200 rounded-2xl p-12 text-center shadow-sm mt-8">
-            <SearchX className="h-12 w-12 text-zinc-300 mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-zinc-900">Queue Empty</h3>
-            <p className="text-zinc-500 mt-1">There are no reports currently needing moderation.</p>
+          <div className="bg-surface border border-border rounded-2xl p-12 text-center shadow-sm mt-8">
+            <SearchX className="h-12 w-12 text-text-secondary mx-auto mb-4" />
+            <h3 className="text-section-title text-text-primary">Queue Empty</h3>
+            <p className="text-body-md text-text-secondary mt-1">There are no reports currently needing moderation.</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {reports.map((report) => {
               const now = Date.now();
               const isLocked = report.locked_until && report.locked_until.toMillis() > now;
@@ -150,15 +153,15 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
               const affectedCount = report.affected_citizen_ids?.length || 1;
 
               return (
-                <div 
+                <Card 
                   key={report.id}
                   onClick={() => handleClaim(report)}
-                  className={`bg-white border border-zinc-200 rounded-xl p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all group relative overflow-hidden ${
+                  className={`cursor-pointer hover:border-status-warning/50 transition-all group relative overflow-hidden ${
                     isLockedByOther ? 'opacity-50' : ''
                   }`}
                 >
                   {isLockedByOther && (
-                    <div className="absolute top-2 right-2 bg-zinc-800 text-white text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider z-10 shadow-sm flex items-center gap-1">
+                    <div className="absolute top-2 right-2 bg-text-primary text-text-inverse text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider z-10 shadow-sm flex items-center gap-1">
                       <Clock className="h-3 w-3" />
                       Claimed
                     </div>
@@ -167,25 +170,23 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
                   {/* Row 1: Category & Severity */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="p-2.5 bg-zinc-50 rounded-lg border border-zinc-100 group-hover:bg-amber-50 transition-colors">
-                        <AlertCircle className="h-5 w-5 text-zinc-600 group-hover:text-amber-600" />
+                      <div className="p-2.5 bg-background rounded-lg border border-border group-hover:bg-status-warning/10 transition-colors">
+                        <AlertCircle className="h-5 w-5 text-text-secondary group-hover:text-status-warning" />
                       </div>
-                      <h4 className="font-semibold text-[16px] text-zinc-900">{report.category || 'Unknown Issue'}</h4>
+                      <h4 className="text-body-lg font-semibold text-text-primary">{report.category || 'Unknown Issue'}</h4>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-[12px] font-semibold border ${getSeverityColors(report.severity)}`}>
-                      {report.severity || 'Medium'}
-                    </span>
+                    <SeverityBadge severity={report.severity || 'Medium'} />
                   </div>
 
                   {/* Row 2: Reason Tag */}
                   <div className="mb-3">
-                    <span className={`inline-block px-2.5 py-1 rounded-full text-[12px] font-semibold ${reasonTag.color}`}>
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-caption font-semibold ${reasonTag.color}`}>
                       {reasonTag.label}
                     </span>
                   </div>
 
                   {/* Row 3: Days Open */}
-                  <div className="flex items-center justify-between pt-3 border-t border-zinc-100 text-[12px] text-zinc-500 font-medium">
+                  <div className="flex items-center justify-between pt-3 border-t border-border text-caption text-text-secondary font-medium">
                     <div className="flex items-center gap-1.5">
                       <Clock className="h-3.5 w-3.5" />
                       {daysOpen} {daysOpen === 1 ? 'day' : 'days'} open
@@ -194,7 +195,7 @@ export default function ModeratorQueueScreen({ onNavigate, onNavigateOut }: Mode
                       {affectedCount} {affectedCount === 1 ? 'citizen' : 'citizens'} affected
                     </div>
                   </div>
-                </div>
+                </Card>
               );
             })}
           </div>

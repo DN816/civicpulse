@@ -8,7 +8,7 @@ async function findMatchingCluster(category, lat, lng, submittedAt) {
     const snapshot = await admin.firestore()
         .collection('clusters')
         .where('category', '==', category)
-        .where('status', '==', 'active')
+        .where('status', 'in', ['active', 'assigned', 'in_review', 'in_progress', 'reopened'])
         .where('created_at', '>=', sevenDaysAgo)
         .get();
     if (snapshot.empty)
@@ -17,7 +17,7 @@ async function findMatchingCluster(category, lat, lng, submittedAt) {
     for (const doc of snapshot.docs) {
         const data = doc.data();
         const distance = (0, haversine_1.haversineMeters)(lat, lng, data.centroid_lat, data.centroid_lng);
-        if (distance <= 50) {
+        if (distance <= 100) {
             if (!closest || distance < closest.distance) {
                 closest = { clusterId: doc.id, centroid_lat: data.centroid_lat, centroid_lng: data.centroid_lng, distance };
             }

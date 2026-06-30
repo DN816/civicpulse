@@ -1,19 +1,20 @@
 import React from 'react';
+import Card from '../../components/ui/Card';
 
 export default function PlaceholderScreen() {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-zinc-950 text-white font-sans p-6">
-      <div className="text-center space-y-4 max-w-md">
-        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+    <div className="flex h-screen w-full items-center justify-center bg-background text-text-primary font-sans p-6">
+      <Card className="text-center space-y-4 max-w-md w-full">
+        <h1 className="text-screen-title text-text-primary">
           CivicPulse
         </h1>
-        <p className="text-zinc-400 font-mono text-sm bg-zinc-900 border border-zinc-800 rounded-lg py-3 px-4 shadow-sm">
+        <p className="text-body-md font-mono text-text-secondary bg-surface border border-border rounded-lg py-3 px-4 shadow-sm">
           Phase 0 Complete
         </p>
-        <p className="text-xs text-zinc-500 font-sans leading-relaxed">
+        <p className="text-caption text-text-secondary leading-relaxed">
           The scaffolding and Firebase initialization are successfully completed.
         </p>
-      </div>
+      </Card>
     </div>
   );
 }

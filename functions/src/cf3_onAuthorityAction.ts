@@ -1,31 +1,33 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import { compareBeforeAfterPhotos } from './utils/geminiCompare';
+import { reportStatusToClusterStatus } from './utils/clusterStatus';
+import { awardXp } from './utils/gamification';
 
 export const onAuthorityAction = onDocumentCreated(
   {
     document: 'report_events/{eventId}',
     region: 'asia-south2',
     database: '(default)',
+    memory: '512MiB',
   },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
     const eventData = snap.data();
 
-    // Only process work_completed events
     if (eventData.event_type !== 'work_completed') return;
 
     const db = admin.firestore();
     const reportId = eventData.report_id;
     const afterPhotoUrl = eventData.after_photo_url;
+    const eventAuthorityId = eventData.authority_id;
 
     if (!reportId || !afterPhotoUrl) {
       console.error('CF3: Missing report_id or after_photo_url on event document');
       return;
     }
 
-    // STEP 1 — Retrieve the before photo from the original report
     const reportRef = db.collection('reports').doc(reportId);
     const reportSnap = await reportRef.get();
     if (!reportSnap.exists) {
@@ -33,20 +35,25 @@ export const onAuthorityAction = onDocumentCreated(
       return;
     }
     const report = reportSnap.data()!;
-    const beforePhotoUrl = report.photo_url;
 
+    if (report.authority_id && eventAuthorityId && report.authority_id !== eventAuthorityId) {
+      console.warn(
+        `CF3: authority_id mismatch for report ${reportId}. Event: ${eventAuthorityId}, Report: ${report.authority_id}`
+      );
+      return;
+    }
+
+    const beforePhotoUrl = report.photo_url;
     if (!beforePhotoUrl) {
       console.error(`CF3: Report ${reportId} has no photo_url`);
       return;
     }
 
-    // STEP 2 & 3 — Call Gemini Vision to compare before/after photos
     let validationResult;
     try {
       validationResult = await compareBeforeAfterPhotos(beforePhotoUrl, afterPhotoUrl);
     } catch (error) {
       console.error('CF3: Gemini before/after comparison failed:', error);
-      // Store a fallback validation result so the pipeline isn't blocked
       validationResult = {
         fix_appears_genuine: false,
         confidence: 0,
@@ -54,24 +61,25 @@ export const onAuthorityAction = onDocumentCreated(
       };
     }
 
-    // Store Gemini response on the report document
+    const currentAttempt = (report.resolution_attempt || 0) + 1;
+
     await reportRef.update({
+      status: 'RESOLVED',
       resolution_validation: validationResult,
       after_photo_url: afterPhotoUrl,
-    });
-
-    // STEP 4 — Open 48-hour dispute window
-    const currentAttempt = (report.resolution_attempt || 0) + 1;
-    const now = new Date();
-    const disputeWindowCloses = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-
-    await reportRef.update({
-      status: 'AWAITING_CONFIRMATION',
-      dispute_window_closes_at: admin.firestore.Timestamp.fromDate(disputeWindowCloses),
       resolution_attempt: currentAttempt,
+      authority_id: eventAuthorityId || report.authority_id || null,
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // STEP 5 — Send FCM to all affected citizens
+    if (report.cluster_id) {
+      await db.collection('clusters').doc(report.cluster_id).update({
+        status: reportStatusToClusterStatus('RESOLVED'),
+        after_photo_url: afterPhotoUrl,
+        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
     const clusterId = report.cluster_id;
     if (!clusterId) {
       console.warn('CF3: No cluster_id on report — skipping FCM');
@@ -84,10 +92,34 @@ export const onAuthorityAction = onDocumentCreated(
       return;
     }
 
-    const clusterData = clusterSnap.data()!;
-    const affectedCitizenIds: string[] = clusterData.affected_citizen_ids || [];
+    const affectedCitizenIds: string[] = clusterSnap.data()?.affected_citizen_ids || [];
 
-    // Send FCM notification to each affected citizen
+    /* ─── Award resolve XP per-citizen with idempotent tracking ─── */
+    /* Uses an array per cluster so each citizen is paid at most once,
+       even if the cluster contains reports from multiple citizens or
+       if CF3 fires concurrently for reports in the same cluster. */
+    const paidCitizens: string[] = clusterSnap.data()?.xp_resolve_awarded_citizens ?? [];
+    const unpaid = affectedCitizenIds.filter(id => !paidCitizens.includes(id));
+
+    for (const citizenId of unpaid) {
+      try {
+        await awardXp(db, citizenId, 375, 'Report resolved', {
+          report_id: reportId,
+          cluster_id: clusterId,
+          incrementResolved: 1,
+        });
+      } catch (xpErr) {
+        console.error(`CF3: XP award failed for citizen ${citizenId}:`, xpErr);
+      }
+    }
+
+    if (unpaid.length > 0) {
+      await db.collection('clusters').doc(clusterId).update({
+        xp_resolve_awarded_citizens: admin.firestore.FieldValue.arrayUnion(...unpaid),
+        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
     for (const citizenId of affectedCitizenIds) {
       try {
         const userSnap = await db.collection('users').doc(citizenId).get();
@@ -98,12 +130,11 @@ export const onAuthorityAction = onDocumentCreated(
           token: fcmToken,
           notification: {
             title: 'CivicPulse',
-            body: 'The authority has marked this issue as resolved. Is it actually fixed?',
+            body: 'Your reported issue has been resolved. Check the after-photo in the app.',
           },
           data: {
-            type: 'dispute',
+            type: 'status_update',
             report_id: reportId,
-            resolution_attempt: String(currentAttempt),
           },
         });
       } catch (fcmError) {
@@ -111,6 +142,6 @@ export const onAuthorityAction = onDocumentCreated(
       }
     }
 
-    console.log(`CF3: Dispute window opened for report ${reportId}, attempt ${currentAttempt}, closes at ${disputeWindowCloses.toISOString()}`);
+    console.log(`CF3: Report ${reportId} marked as resolved`);
   }
 );

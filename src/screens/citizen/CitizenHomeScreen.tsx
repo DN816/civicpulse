@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { LogOut, Shield, PlusCircle, Map as MapIcon, User as UserIcon, Home, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { LogOut, MapPin, Plus, ShieldCheck, Wrench, PartyPopper, ArrowRight, Star, Camera } from 'lucide-react';
 import { auth, db } from '../../config/firebase';
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { CitizenScreenType } from './CitizenRouter';
+import CitizenHeader from '../../components/citizen/CitizenHeader';
+import SkeletonLoader from '../../components/ui/SkeletonLoader';
+import Toast, { ToastType } from '../../components/ui/Toast';
 
 interface CitizenHomeScreenProps {
   onNavigate: (screen: CitizenScreenType, reportId?: string) => void;
@@ -13,164 +16,292 @@ interface ReportActivity {
   id: string;
   status: string;
   category?: string;
+  description?: string;
+  photo_url?: string;
+  after_photo_url?: string;
   created_at?: Timestamp;
 }
 
+type FilterType = 'all' | 'active' | 'resolved';
+
+function getProgressPercent(status: string): number {
+  const s = status?.toUpperCase();
+  if (s === 'RESOLVED') return 100;
+  if (['IN_REVIEW'].includes(s)) return 75;
+  if (['ASSIGNED', 'APPROVED', 'IN_PROGRESS'].includes(s)) return 50;
+  return 25;
+}
+
+function getStatusChip(status: string): { label: string; className: string } {
+  const s = status?.toUpperCase();
+  if (s === 'RESOLVED') {
+    return { label: 'Resolved', className: 'bg-primary text-text-inverse border-border' };
+  }
+  if (['ASSIGNED', 'IN_REVIEW', 'IN_PROGRESS', 'APPROVED'].includes(s)) {
+    return { label: 'In Progress', className: 'bg-secondary-container text-secondary border-border' };
+  }
+  if (['NEW', 'AWAITING_CLARIFICATION'].includes(s)) {
+    return { label: 'Scheduled', className: 'bg-tertiary-container text-tertiary border-border' };
+  }
+  return { label: 'Pending', className: 'bg-surface-container text-on-surface-variant border-border' };
+}
+
+const STEPS = [
+  { label: 'Reported', icon: Plus },
+  { label: 'Verified', icon: ShieldCheck },
+  { label: 'Dispatched', icon: Wrench },
+  { label: 'Resolved', icon: PartyPopper },
+];
+
 export default function CitizenHomeScreen({ onNavigate, onNavigateOut }: CitizenHomeScreenProps) {
-  const [activities, setActivities] = useState<ReportActivity[]>([]);
+  const [reports, setReports] = useState<ReportActivity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const currentUser = auth.currentUser;
 
   useEffect(() => {
     if (!currentUser) return;
 
-    // Listen to reports created by this citizen
-    const q = query(
-      collection(db, 'reports'),
-      where('citizen_id', '==', currentUser.uid)
-    );
+    const q = query(collection(db, 'reports'), where('citizen_id', '==', currentUser.uid));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data: ReportActivity[] = [];
-      snapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...doc.data() } as ReportActivity);
-      });
-      // Sort by created_at descending client-side if index not ready
-      data.sort((a, b) => {
-        const tA = a.created_at?.toMillis() || 0;
-        const tB = b.created_at?.toMillis() || 0;
-        return tB - tA;
-      });
-      setActivities(data);
-      setLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const data: ReportActivity[] = [];
+        snapshot.forEach((docSnap) => {
+          data.push({ id: docSnap.id, ...docSnap.data() } as ReportActivity);
+        });
+        data.sort((a, b) => (b.created_at?.toMillis() || 0) - (a.created_at?.toMillis() || 0));
+        setReports(data);
+        setLoading(false);
+      },
+      () => {
+        setToast({ message: 'Could not load your reports. Please try again.', type: 'error' });
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  const filteredReports = useMemo(() => {
+    if (filter === 'all') return reports;
+    if (filter === 'resolved') return reports.filter((r) => r.status?.toUpperCase() === 'RESOLVED');
+    return reports.filter((r) => r.status?.toUpperCase() !== 'RESOLVED');
+  }, [reports, filter]);
 
   const handleSignOut = async () => {
     await auth.signOut();
     onNavigateOut('welcome');
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'NEW':
-      case 'IN_REVIEW':
-      case 'AWAITING_CLARIFICATION':
-        return <Clock className="h-5 w-5 text-amber-500" />;
-      case 'ASSIGNED':
-      case 'IN_PROGRESS':
-        return <AlertTriangle className="h-5 w-5 text-blue-500" />;
-      case 'RESOLVED':
-        return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
-      case 'REJECTED':
-        return <XCircle className="h-5 w-5 text-red-500" />;
-      default:
-        return <Clock className="h-5 w-5 text-zinc-500" />;
-    }
-  };
+  const filters: { id: FilterType; label: string }[] = [
+    { id: 'all', label: 'All Reports' },
+    { id: 'active', label: 'In Progress' },
+    { id: 'resolved', label: 'Resolved' },
+  ];
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-50 text-zinc-900 font-sans pb-16">
-      {/* Header */}
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6">
-        <div className="flex items-center gap-2">
-          <Shield className="h-6 w-6 text-blue-600" />
-          <span className="font-bold tracking-tight text-lg">CivicPulse</span>
-        </div>
-        <button
-          onClick={handleSignOut}
-          className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 transition text-sm font-medium"
-        >
-          <LogOut className="h-4 w-4" />
-          Sign Out
-        </button>
-      </header>
+    <div className="flex min-h-screen flex-col bg-background pb-36 font-sans text-text-primary">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full space-y-6">
-        <div className="flex flex-col items-center p-6 bg-blue-600 text-white rounded-2xl shadow-lg">
-          <h2 className="text-xl font-semibold mb-2">See a civic issue?</h2>
-          <p className="text-blue-100 mb-6 text-center text-sm">
-            Help improve your city by reporting potholes, leaks, and more.
-          </p>
+      <CitizenHeader />
+
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-8">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-3xl font-bold text-text-primary">Progress Tracker</h2>
+            <p className="mt-1 text-base text-on-surface-variant">
+              Level up your community! Track the status of active reports below.
+            </p>
+          </div>
           <button
-            onClick={() => onNavigate('report')}
-            className="flex items-center gap-2 bg-white text-blue-600 px-6 py-3 rounded-xl font-bold hover:bg-blue-50 transition shadow-sm"
+            type="button"
+            onClick={handleSignOut}
+            className="hidden shrink-0 items-center gap-1 text-sm font-semibold text-on-surface-variant hover:text-text-primary sm:flex"
           >
-            <PlusCircle className="h-5 w-5" />
-            Report a Problem
+            <LogOut className="h-4 w-4" />
+            Sign out
           </button>
         </div>
 
-        <div className="space-y-4">
-          <h3 className="text-lg font-bold tracking-tight">Recent Activity</h3>
-          
-          {loading ? (
-            <div className="flex justify-center p-8">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-200 border-t-blue-600" />
-            </div>
-          ) : activities.length === 0 ? (
-            <div className="bg-white border border-zinc-200 rounded-xl p-8 text-center text-zinc-500 shadow-sm">
-              You haven't reported any issues yet.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {activities.map((activity) => (
-                <div 
-                  key={activity.id}
-                  onClick={() => {
-                    if (activity.status === 'REJECTED') {
-                      onNavigate('rejection');
-                    } else if (activity.status === 'AWAITING_CLARIFICATION') {
-                      onNavigate('clarification', activity.id);
-                    } else if (activity.status === 'NEW') {
-                      onNavigate('submission-pending', activity.id);
-                    } else {
-                      onNavigate('report-detail', activity.id);
-                    }
-                  }}
-                  className="bg-white border border-zinc-200 rounded-xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-300 hover:shadow-sm transition"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="p-2 bg-zinc-50 rounded-lg border border-zinc-100">
-                      {getStatusIcon(activity.status)}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold">{activity.category || 'Unknown Issue'}</h4>
-                      <p className="text-xs text-zinc-500 font-medium mt-1">Status: {activity.status.replace(/_/g, ' ')}</p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-zinc-400">
-                    {activity.created_at ? new Date(activity.created_at.toMillis()).toLocaleDateString() : ''}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="scrollbar-hide mb-8 flex gap-3 overflow-x-auto pb-2">
+          {filters.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setFilter(id)}
+              className={`shrink-0 rounded-xl border-2 border-border px-6 py-2 text-sm font-bold shadow-[3px_3px_0_0_var(--cp-border)] transition-all active:translate-x-0.5 active:translate-y-0.5 active:shadow-none ${
+                filter === id
+                  ? 'bg-primary text-text-inverse'
+                  : 'bg-surface-container-lowest text-text-primary hover:bg-surface-container-high'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+
+        {loading ? (
+          <SkeletonLoader />
+        ) : filteredReports.length === 0 ? (
+          <div className="gamified-card gamified-shadow flex flex-col items-center bg-surface-container-lowest p-10 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full border-2 border-border bg-primary-container">
+              <Star className="h-8 w-8 text-primary" />
+            </div>
+            <h3 className="font-display text-xl font-bold">No Reports Yet</h3>
+            <p className="mt-2 text-sm text-on-surface-variant">Start your first quest and earn Hero XP.</p>
+            <button
+              type="button"
+              onClick={() => onNavigate('report')}
+              className="neo-3d mt-6 flex h-12 items-center gap-2 rounded-xl border-4 border-border bg-primary px-6 font-bold text-text-inverse"
+            >
+              <Plus className="h-5 w-5" />
+              Report an Issue
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {filteredReports.map((report) => {
+              const progress = getProgressPercent(report.status);
+              const chip = getStatusChip(report.status);
+              const isResolved = report.status?.toUpperCase() === 'RESOLVED';
+              const activeStep = Math.min(4, Math.ceil(progress / 25));
+
+              return (
+                <article
+                  key={report.id}
+                  className={`gamified-card gamified-shadow bg-surface-container-lowest p-6 transition-transform hover:-translate-y-1 ${
+                    isResolved ? 'opacity-90' : ''
+                  }`}
+                >
+                  <div className="mb-6 flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-display text-xl font-semibold text-text-primary">
+                        {report.category || 'Issue Reported'}
+                      </h3>
+                      <p className="mt-1 flex items-center gap-1 text-xs font-medium text-on-surface-variant">
+                        <MapPin className="h-4 w-4 shrink-0" />
+                        <span className="line-clamp-1">{report.description || 'Community report'}</span>
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-lg border-2 px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${chip.className}`}
+                    >
+                      {chip.label}
+                    </span>
+                  </div>
+
+                  {report.photo_url && (
+                    <div className="mb-4 flex gap-2">
+                      <div className="relative w-20 h-16 shrink-0 rounded-lg overflow-hidden border border-border bg-background">
+                        <img src={report.photo_url} alt="Before" className="w-full h-full object-cover" />
+                        {report.after_photo_url && (
+                          <div className="absolute bottom-0.5 left-0.5 bg-black/60 text-white text-[8px] font-bold px-1 rounded">
+                            BEFORE
+                          </div>
+                        )}
+                      </div>
+                      {report.after_photo_url && (
+                        <div className="relative w-20 h-16 shrink-0 rounded-lg overflow-hidden border border-border bg-background">
+                          <img src={report.after_photo_url} alt="After" className="w-full h-full object-cover" />
+                          <div className="absolute bottom-0.5 left-0.5 bg-status-success text-white text-[8px] font-bold px-1 rounded">
+                            AFTER
+                          </div>
+                        </div>
+                      )}
+                      {!report.after_photo_url && (
+                        <div className="flex items-center gap-1.5 text-caption text-on-surface-variant">
+                          <Camera className="h-3.5 w-3.5" />
+                          Issue photo
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {isResolved ? (
+                    <div className="mb-4 flex items-center gap-4 rounded-xl border-2 border-border bg-primary-container p-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-border bg-primary">
+                        <Star className="h-6 w-6 text-text-inverse" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-primary-dark">Quest Complete!</p>
+                        <p className="text-xs text-on-surface-variant">You helped improve the neighborhood.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="relative mb-8 pt-2">
+                      <div className="absolute left-0 top-5 h-2 w-full rounded-full border-2 border-border bg-surface-container" />
+                      <div
+                        className="absolute left-0 top-5 h-2 rounded-full border-2 border-r-0 border-border bg-primary-container"
+                        style={{ width: `${Math.max(progress, 8)}%` }}
+                      />
+                      <div className="relative flex justify-between">
+                        {STEPS.map((step, index) => {
+                          const stepNum = index + 1;
+                          const isDone = activeStep > stepNum;
+                          const isCurrent = activeStep === stepNum;
+                          const Icon = step.icon;
+                          return (
+                            <div key={step.label} className="flex flex-col items-center">
+                              <div
+                                className={`z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 border-border ${
+                                  isDone || isCurrent
+                                    ? 'bg-primary text-text-inverse'
+                                    : 'bg-surface-container-lowest text-on-surface-variant'
+                                } ${isCurrent ? 'animate-pulse bg-primary-container text-primary-dark' : ''}`}
+                              >
+                                <Icon className="h-5 w-5" />
+                              </div>
+                              <span
+                                className={`mt-2 text-xs font-bold ${
+                                  isDone || isCurrent ? 'text-primary' : 'font-medium text-on-surface-variant'
+                                }`}
+                              >
+                                {step.label}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between border-t-2 border-surface-container pt-4">
+                    <span className="text-sm font-bold text-text-primary">
+                      {report.created_at
+                        ? new Date(report.created_at.toMillis()).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })
+                        : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('report-detail', report.id)}
+                      className="neo-3d flex items-center gap-1 rounded-lg border-2 border-border bg-primary px-4 py-2 text-sm font-bold text-text-inverse"
+                    >
+                      View Details
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-zinc-200 flex items-center justify-around px-2 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <button onClick={() => onNavigate('home')} className="flex flex-col items-center gap-1 text-blue-600 w-16">
-          <Home className="h-6 w-6" />
-          <span className="text-[10px] font-medium">Home</span>
-        </button>
-        <button onClick={() => onNavigate('map')} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-zinc-900 transition w-16">
-          <MapIcon className="h-6 w-6" />
-          <span className="text-[10px] font-medium">Map</span>
-        </button>
-        <button onClick={() => onNavigate('report')} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-zinc-900 transition w-16">
-          <PlusCircle className="h-6 w-6" />
-          <span className="text-[10px] font-medium">Report</span>
-        </button>
-        <button onClick={() => onNavigate('profile')} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-zinc-900 transition w-16">
-          <UserIcon className="h-6 w-6" />
-          <span className="text-[10px] font-medium">Profile</span>
-        </button>
-      </nav>
+      <button
+        type="button"
+        onClick={() => onNavigate('report')}
+        aria-label="Report an issue"
+        className="fixed bottom-28 right-6 z-40 flex h-16 w-16 items-center justify-center rounded-2xl border-4 border-border bg-secondary-container text-secondary shadow-[6px_6px_0_0_var(--cp-border)] transition-all active:translate-x-1 active:translate-y-1 active:shadow-none md:hidden"
+      >
+        <Plus className="h-8 w-8" />
+      </button>
     </div>
   );
 }

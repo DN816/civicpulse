@@ -4,18 +4,15 @@ exports.slaMonitor = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const cf7_escalationEmailSender_1 = require("./cf7_escalationEmailSender");
+const clusterStatus_1 = require("./utils/clusterStatus");
 exports.slaMonitor = (0, scheduler_1.onSchedule)({
     schedule: 'every 60 minutes',
-    region: 'asia-south1'
-}, async (event) => {
+    region: 'asia-south1',
+}, async () => {
     const db = admin.firestore();
     const now = admin.firestore.Timestamp.now();
-    // Query Firestore for reports where:
-    // escalation_sent = false
-    // sla_deadline <= NOW()
-    // Due to Firestore index limitations on inequality queries, we filter by these two
-    // and then filter out RESOLVED, CLOSED, REJECTED statuses in memory.
-    const snapshot = await db.collection('reports')
+    const snapshot = await db
+        .collection('reports')
         .where('escalation_sent', '==', false)
         .where('sla_deadline', '<=', now)
         .get();
@@ -32,20 +29,31 @@ exports.slaMonitor = (0, scheduler_1.onSchedule)({
         }
         console.log(`Escalating report ${doc.id}...`);
         try {
-            await (0, cf7_escalationEmailSender_1.escalationEmailSender)(doc.id, data);
+            const emailResult = await (0, cf7_escalationEmailSender_1.escalationEmailSender)(doc.id, data);
+            if (!emailResult.emailSent) {
+                await doc.ref.update({
+                    escalation_email_failed: true,
+                    updated_at: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                console.error(`CF6: Email failed for report ${doc.id} — not marking as escalated.`);
+                continue;
+            }
             await doc.ref.update({
                 escalation_sent: true,
-                status: 'ESCALATED'
+                escalation_email_failed: false,
+                status: 'ESCALATED',
+                updated_at: admin.firestore.FieldValue.serverTimestamp(),
             });
-            // Also update the cluster status to ESCALATED if it's not already resolved
             if (data.cluster_id) {
                 const clusterRef = db.collection('clusters').doc(data.cluster_id);
                 const clusterSnap = await clusterRef.get();
                 const clusterData = clusterSnap.data();
-                if (clusterData && !excludeStatuses.includes(clusterData.status)) {
+                const terminalCluster = ['resolved', 'closed', 'RESOLVED', 'CLOSED'];
+                if (clusterData && !terminalCluster.includes(clusterData.status)) {
                     await clusterRef.update({
                         escalation_sent: true,
-                        status: 'ESCALATED'
+                        status: (0, clusterStatus_1.reportStatusToClusterStatus)('ESCALATED'),
+                        updated_at: admin.firestore.FieldValue.serverTimestamp(),
                     });
                 }
             }
@@ -53,6 +61,10 @@ exports.slaMonitor = (0, scheduler_1.onSchedule)({
         }
         catch (err) {
             console.error(`Failed to escalate report ${doc.id}:`, err);
+            await doc.ref.update({
+                escalation_email_failed: true,
+                updated_at: admin.firestore.FieldValue.serverTimestamp(),
+            });
         }
     }
     console.log(`Escalated ${count} reports.`);

@@ -1,45 +1,80 @@
-import React from 'react';
-import { XCircle, RefreshCw, Home } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { XCircle, RefreshCw, Home, Loader2 } from 'lucide-react';
+import { db } from '../../config/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { CitizenScreenType } from './CitizenRouter';
+import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
 
 interface RejectionScreenProps {
+  reportId: string;
   onNavigate: (screen: CitizenScreenType) => void;
 }
 
-export default function RejectionScreen({ onNavigate }: RejectionScreenProps) {
+export default function RejectionScreen({ reportId, onNavigate }: RejectionScreenProps) {
+  const [reason, setReason] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchReason = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'reports', reportId));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.error_message) {
+            setReason(data.error_message);
+          } else if (data.status === 'REJECTED') {
+            setReason("We couldn't identify a civic issue in this photo — try again with a clearer shot.");
+          } else {
+            setReason("We couldn't identify a civic issue in this photo — try again with a clearer shot.");
+          }
+        } else {
+          setReason("We couldn't identify a civic issue in this photo — try again with a clearer shot.");
+        }
+      } catch {
+        setReason("We couldn't identify a civic issue in this photo — try again with a clearer shot.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReason();
+  }, [reportId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-50 p-6 text-center font-sans">
-      <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full space-y-6 border border-zinc-100 flex flex-col items-center">
-        <div className="h-20 w-20 bg-red-50 rounded-full flex items-center justify-center mb-2">
-          <XCircle className="h-10 w-10 text-red-500" />
+    <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6 text-center font-sans">
+      <Card variant="elevated" className="max-w-sm w-full space-y-6 flex flex-col items-center p-8">
+        <div className="h-20 w-20 bg-severity-high-bg rounded-full flex items-center justify-center mb-2">
+          <XCircle className="h-10 w-10 text-severity-high" />
         </div>
-        
-        <h2 className="text-2xl font-bold tracking-tight text-zinc-900">
+
+        <h2 className="text-screen-title text-text-primary">
           Issue Not Detected
         </h2>
-        
-        <p className="text-zinc-500 text-sm leading-relaxed">
-          We couldn't identify a civic issue in this photo — try again with a clearer shot.
+
+        <p className="text-body-md text-text-secondary leading-relaxed">
+          {reason}
         </p>
-        
+
         <div className="w-full space-y-3 pt-4">
-          <button
-            onClick={() => onNavigate('report')}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition shadow-sm"
-          >
+          <Button onClick={() => onNavigate('report')} fullWidth>
             <RefreshCw className="h-5 w-5" />
             Try Again
-          </button>
-          
-          <button
-            onClick={() => onNavigate('home')}
-            className="w-full flex items-center justify-center gap-2 bg-zinc-100 text-zinc-700 py-4 rounded-xl font-bold hover:bg-zinc-200 transition"
-          >
+          </Button>
+
+          <Button onClick={() => onNavigate('home')} variant="secondary" fullWidth>
             <Home className="h-5 w-5" />
             Go Home
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

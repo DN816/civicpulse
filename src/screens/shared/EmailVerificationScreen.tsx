@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MailCheck, RefreshCw, LogOut } from 'lucide-react';
 import { auth } from '../../config/firebase';
 import { sendEmailVerification, signOut } from 'firebase/auth';
+import Button from '../../components/ui/Button';
+import { getAuthErrorCode, getAuthErrorMessage } from '../../utils/authErrors';
 
 interface EmailVerificationScreenProps {
   onNavigate: (screen: 'welcome' | 'signin' | 'create-account' | 'router' | 'verify-email') => void;
@@ -14,6 +16,27 @@ export default function EmailVerificationScreen({ onNavigate }: EmailVerificatio
   const [success, setSuccess] = useState<string | null>(null);
 
   const userEmail = auth.currentUser?.email || 'your email';
+
+  useEffect(() => {
+    const pollVerification = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      try {
+        await user.reload();
+        if (user.emailVerified) {
+          onNavigate('router');
+        }
+      } catch {
+        // Silent poll failure — user can tap "I've verified my email"
+      }
+    };
+
+    const interval = setInterval(pollVerification, 5000);
+    pollVerification();
+
+    return () => clearInterval(interval);
+  }, [onNavigate]);
 
   const handleCheckVerification = async () => {
     setIsChecking(true);
@@ -35,9 +58,8 @@ export default function EmailVerificationScreen({ onNavigate }: EmailVerificatio
       } else {
         setError('Email not verified yet. Please check your inbox.');
       }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to check verification status.');
+    } catch (err: unknown) {
+      setError(getAuthErrorMessage(err, 'Failed to check verification status.'));
     } finally {
       setIsChecking(false);
     }
@@ -57,12 +79,12 @@ export default function EmailVerificationScreen({ onNavigate }: EmailVerificatio
 
       await sendEmailVerification(user);
       setSuccess('Verification email sent! Please check your inbox.');
-    } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/too-many-requests') {
+    } catch (err: unknown) {
+      const code = getAuthErrorCode(err);
+      if (code === 'auth/too-many-requests') {
         setError('Too many requests. Please wait a few minutes before trying again.');
       } else {
-        setError(err.message || 'Failed to resend verification email.');
+        setError(getAuthErrorMessage(err, 'Failed to resend verification email.'));
       }
     } finally {
       setIsResending(false);
@@ -75,48 +97,48 @@ export default function EmailVerificationScreen({ onNavigate }: EmailVerificatio
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-950 text-white font-sans">
+    <div className="flex min-h-screen flex-col bg-background text-text-primary font-sans">
       {/* Header */}
-      <header className="flex h-16 items-center justify-center px-4 border-b border-zinc-900 bg-zinc-900/50">
-        <span className="font-semibold text-zinc-300">Verify Your Email</span>
+      <header className="flex h-16 items-center justify-center px-4 border-b border-border bg-surface">
+        <span className="text-label text-text-primary">Verify Your Email</span>
       </header>
 
       {/* Content */}
       <div className="flex-1 flex flex-col justify-center px-6 py-8 max-w-md mx-auto w-full space-y-6">
         <div className="text-center space-y-4">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600/10 border border-blue-500/20">
-            <MailCheck className="h-8 w-8 text-blue-500" />
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20">
+            <MailCheck className="h-8 w-8 text-primary" />
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">
+          <h2 className="text-screen-title text-text-primary">
             Check your inbox
           </h2>
-          <p className="text-zinc-400 text-sm leading-relaxed">
+          <p className="text-body-md text-text-secondary leading-relaxed">
             We sent a verification email to{' '}
-            <span className="text-blue-400 font-medium">{userEmail}</span>.
+            <span className="text-primary font-medium">{userEmail}</span>.
             Please check your inbox and click the link to continue.
           </p>
         </div>
 
         {/* Error Message */}
         {error && (
-          <p className="text-xs text-red-500 bg-red-950/20 border border-red-900/30 rounded-lg p-3 text-center">
+          <p className="text-caption text-severity-high bg-severity-high-bg border border-severity-high/20 rounded-lg p-3 text-center">
             {error}
           </p>
         )}
 
         {/* Success Message */}
         {success && (
-          <p className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3 text-center">
+          <p className="text-caption text-status-success bg-severity-low-bg border border-status-success/20 rounded-lg p-3 text-center">
             {success}
           </p>
         )}
 
         {/* Actions */}
         <div className="space-y-3">
-          <button
+          <Button
             onClick={handleCheckVerification}
             disabled={isChecking}
-            className="w-full h-12 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium rounded-lg transition duration-200 shadow-lg shadow-blue-500/10 disabled:opacity-50 flex items-center justify-center gap-2"
+            fullWidth
           >
             {isChecking ? (
               <>
@@ -126,12 +148,13 @@ export default function EmailVerificationScreen({ onNavigate }: EmailVerificatio
             ) : (
               "I've verified my email"
             )}
-          </button>
+          </Button>
 
-          <button
+          <Button
             onClick={handleResendEmail}
             disabled={isResending}
-            className="w-full h-12 bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-850 border border-zinc-800 text-zinc-200 font-medium rounded-lg transition duration-200 disabled:opacity-50 flex items-center justify-center gap-2"
+            variant="secondary"
+            fullWidth
           >
             {isResending ? (
               <>
@@ -144,15 +167,16 @@ export default function EmailVerificationScreen({ onNavigate }: EmailVerificatio
                 Resend email
               </>
             )}
-          </button>
+          </Button>
 
-          <button
+          <Button
             onClick={handleSignOut}
-            className="w-full h-12 bg-transparent hover:bg-zinc-900 text-zinc-500 hover:text-zinc-300 font-medium rounded-lg transition duration-200 flex items-center justify-center gap-2"
+            variant="text"
+            fullWidth
           >
             <LogOut className="h-4 w-4" />
             Sign Out
-          </button>
+          </Button>
         </div>
       </div>
     </div>

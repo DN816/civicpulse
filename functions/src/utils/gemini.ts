@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { assertFirebaseStorageUrl } from './storageUrl';
 
 export interface ClassificationResult {
   is_civic_issue: boolean;
@@ -13,7 +14,7 @@ export async function classifyReportPhoto(
   photoUrl: string,
   description: string | null
 ): Promise<ClassificationResult> {
-  const ai = new GoogleGenAI({});
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   const prompt = `
 You are a civic issue classifier. Look at this photo and return a JSON object only.
@@ -52,6 +53,7 @@ export async function fetchImageAsBase64(url: string): Promise<string> {
   if (url.startsWith('data:image/')) {
     return url.split(',')[1];
   }
+  assertFirebaseStorageUrl(url, 'photo_url');
   const fetch = (await import('node-fetch')).default;
   const response = await fetch(url, {
     headers: {
