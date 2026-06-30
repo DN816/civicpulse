@@ -6,7 +6,6 @@ import { needsEmailVerification } from '../utils/authHelpers';
 
 const CitizenRouter = React.lazy(() => import('../screens/citizen/CitizenRouter'));
 const AuthorityRouter = React.lazy(() => import('../screens/authority/AuthorityRouter'));
-const ModeratorRouter = React.lazy(() => import('../screens/moderator/ModeratorRouter'));
 
 interface RoleRouterProps {
   onNavigate: (screen: 'welcome' | 'signin' | 'create-account' | 'router' | 'verify-email') => void;
@@ -96,7 +95,6 @@ export default function RoleRouter({ onNavigate }: RoleRouterProps) {
     <Suspense fallback={<RouterFallback />}>
       {role === 'citizen' && <CitizenRouter onNavigateOut={onNavigate} />}
       {role === 'authority' && <AuthorityRouter onNavigateOut={onNavigate} />}
-      {role === 'moderator' && <ModeratorRouter onNavigateOut={onNavigate} />}
     </Suspense>
   );
 }

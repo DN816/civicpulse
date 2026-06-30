@@ -1,7 +1,7 @@
 // src/types/index.ts
 import type { Timestamp } from 'firebase/firestore';
 
-export type UserRole = 'citizen' | 'authority' | 'moderator';
+export type UserRole = 'citizen' | 'authority';
 
 export type Severity = 'Low' | 'Medium' | 'High';
 
@@ -66,7 +66,6 @@ export interface Report {
   resolution_validation: ResolutionValidation | null;
   pii_flag: boolean;
   pii_handled: boolean;
-  moderator_id: string | null;
   locked_until: Timestamp | null;
   appeal_text: string | null;
   photo_timestamp: Timestamp | null;

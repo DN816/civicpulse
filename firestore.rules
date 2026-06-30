@@ -18,10 +18,6 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.role == role;
     }
 
-    function isModerator() {
-      return hasRole('moderator');
-    }
-
     function isAuthority() {
       return hasRole('authority');
     }
@@ -54,20 +50,6 @@ service cloud.firestore {
         && (!('geo_accuracy_unknown' in data) || data.geo_accuracy_unknown is bool);
     }
 
-    function isModeratorLockClaim() {
-      return isModerator()
-        && resource.data.status == 'IN_REVIEW'
-        && request.resource.data.moderator_id == request.auth.uid
-        && request.resource.data.locked_until is timestamp
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moderator_id', 'locked_until'])
-        && (
-          !('locked_until' in resource.data)
-          || resource.data.locked_until == null
-          || resource.data.locked_until <= request.time
-          || resource.data.moderator_id == request.auth.uid
-        );
-    }
-
     function isCitizenClarificationUpdate() {
       return hasRole('citizen')
         && resource.data.citizen_id == request.auth.uid
@@ -78,14 +60,6 @@ service cloud.firestore {
         && request.resource.data.description is string
         && request.resource.data.description.size() <= 5000
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clarification_answer', 'description', 'status']);
-    }
-
-    function isValidModeratorAudit(data) {
-      return data.keys().hasAll(['report_id', 'moderator_id', 'action', 'reason', 'created_at'])
-        && data.moderator_id == request.auth.uid
-        && data.report_id is string && data.report_id.size() <= 128
-        && data.action is string && data.action.size() <= 50
-        && data.reason is string && data.reason.size() <= 2000;
     }
 
     function isAuthorityClusterStatusUpdate() {
@@ -107,19 +81,6 @@ service cloud.firestore {
       return hasRole('citizen')
         && resource.data.status == 'AWAITING_CONFIRMATION'
         && request.resource.data.status == 'RESOLVED'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updated_at']);
-    }
-
-    function isModeratorReportUpdate() {
-      return isModerator()
-        && resource.data.moderator_id == request.auth.uid
-        && (resource.data.locked_until == null || request.time < resource.data.locked_until)
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'locked_until', 'moderator_id', 'pii_handled', 'photo_url', 'pii_flag']);
-    }
-
-    function isModeratorClusterStatusUpdate() {
-      return isModerator()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updated_at']);
     }
 
@@ -149,10 +110,8 @@ service cloud.firestore {
     match /reports/{reportId} {
       allow read: if isSignedIn();
       allow create: if hasRole('citizen') && isValidId(reportId) && isValidReport(request.resource.data);
-      allow update: if isModeratorLockClaim()
-        || isCitizenClarificationUpdate()
+      allow update: if isCitizenClarificationUpdate()
         || isAuthorityReportStatusUpdate()
-        || isModeratorReportUpdate()
         || isCitizenReportResolve();
       allow delete: if false;
     }
@@ -160,7 +119,7 @@ service cloud.firestore {
     match /clusters/{clusterId} {
       allow read: if isSignedIn();
       allow create, delete: if false;
-      allow update: if isAuthorityClusterStatusUpdate() || isModeratorClusterStatusUpdate();
+      allow update: if isAuthorityClusterStatusUpdate();
     }
 
     match /report_events/{eventId} {
@@ -178,19 +137,13 @@ service cloud.firestore {
     }
 
     match /escalation_log/{logId} {
-      allow read: if isAuthority() || isModerator();
+      allow read: if isAuthority();
       allow write: if false;
     }
 
     match /authorities/{authorityId} {
-      allow read: if isOwner(authorityId) || isModerator();
+      allow read: if isOwner(authorityId);
       allow write: if false;
-    }
-
-    match /moderator_audits/{auditId} {
-      allow read: if isModerator();
-      allow create: if isModerator() && isValidId(auditId) && isValidModeratorAudit(request.resource.data);
-      allow update, delete: if false;
     }
 
     match /citizen_stats/{userId} {
