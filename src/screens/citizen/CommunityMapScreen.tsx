@@ -167,11 +167,11 @@ export default function CommunityMapScreen() {
       )}
 
       {/* Map */}
-      <div className="relative flex-1">
+      <div className="h-[50vh] min-h-[280px] md:h-[60vh]">
         <MapContainer
           center={userPos || [28.6139, 77.2090]}
           zoom={12}
-          className="absolute inset-0 h-full w-full"
+          className="h-full w-full rounded-lg border-2 border-border"
           zoomControl={true}
           scrollWheelZoom={true}
         >
